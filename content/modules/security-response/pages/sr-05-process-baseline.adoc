@@ -1,0 +1,110 @@
+= 5. Process Baselining
+:toc:
+:toclevels: 1
+:icons: font
+
+xref:index.adoc[← Security response overview]
+
+== Overview
+
+Image hardening takes time to reach every pipeline. Morgan wants a platform control that flags unexpected processes now. Sarah locks the RHACS process baseline for `payment-gateway`, then locks every baseline in the vulnerable-workload namespace through the API.
+
+RHACS records processes it sees while a baseline is unlocked. After the baseline is locked, a process that was not on that list raises *Unauthorized Process Execution*. Detection is on by default. Killing the pod is a later enforcement choice.
+
+image::fsi-security/sarah-meeting-demo.png[Morgan and Sarah review baselining,link=self, window=blank, width=100%]
+
+== Your mission
+
+Show that a shell can run, remove that shell from the learned baseline, lock it, and confirm the violation. Then lock the `vulnerable-workload-{workshop_user_suffix}` baselines with the API token from lab setup.
+
+.Run a shell in the payment gateway
+[%collapsible]
+====
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc -n payment-gateway-{workshop_user_suffix} exec deploy/payment-gateway -- \
+  /bin/bash -c "whoami && hostname && echo 'Arbitrary process execution successful'"
+----
+
+The command succeeds. That is the gap: anyone who can exec can start a process the application does not need.
+====
+
+.Review Process Discovery
+[%collapsible]
+====
+. In RHACS, open *Risk* and select deployment `payment-gateway` in namespace `payment-gateway-{workshop_user_suffix}`.
+. Open *Process Discovery*.
+. The baseline is still unlocked, so the shell you just ran may already be on the list. An unlocked baseline keeps learning. It does not alert.
+====
+
+.Lock the baseline
+[%collapsible]
+====
+. On *Process Discovery*, remove `/bin/bash` and any other shell you do not want treated as normal. Use the *X* next to that process.
+. Leave `httpd` and its workers on the list.
+. Click the lock icon.
+
+image::fsi-security/locked1.png[Process discovery before lock,link=self, window=blank, width=100%]
+
+image::fsi-security/locked2.png[Removing a shell from the baseline,link=self, window=blank, width=100%]
+
+image::fsi-security/locked3.png[Locked process baseline,link=self, window=blank, width=100%]
+
+Run the same shell again:
+
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc -n payment-gateway-{workshop_user_suffix} exec deploy/payment-gateway -- \
+  /bin/bash -c "whoami && hostname && echo 'Can I still do this?'"
+----
+
+The exec still runs. RHACS is detecting, not blocking. Open *Violations* and find *Unauthorized Process Execution* for `payment-gateway`.
+
+image::fsi-security/locked4.png[Unauthorized process execution violation,link=self, window=blank, width=100%]
+
+image::fsi-security/locked5.png[Violation detail for the shell,link=self, window=blank, width=100%]
+====
+
+.Lock every baseline in the vulnerable-workload namespace
+[%collapsible]
+====
+Lab setup already saved an API token. This uses that token. It does not print it.
+
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+source ~/.acs-roadshow/env
+test -n "$ROX_API_TOKEN"
+test -n "$ROX_CENTRAL_ADDRESS"
+
+curl --silent --insecure \
+  --header "Authorization: Bearer ${ROX_API_TOKEN}" \
+  "https://${ROX_CENTRAL_ADDRESS}/v1/clusters" \
+  | jq -r '.clusters[] | "\(.id) \(.name)"'
+
+export CLUSTER_ID="$(curl --silent --insecure \
+  --header "Authorization: Bearer ${ROX_API_TOKEN}" \
+  "https://${ROX_CENTRAL_ADDRESS}/v1/clusters" \
+  | jq -r '.clusters[0].id')"
+echo "Locking baselines with cluster ${CLUSTER_ID}"
+
+curl --silent --insecure \
+  --header "Authorization: Bearer ${ROX_API_TOKEN}" \
+  --header "Content-Type: application/json" \
+  --request PUT \
+  "https://${ROX_CENTRAL_ADDRESS}/v1/processbaselines/bulk/lock" \
+  --data "{\"cluster_id\": \"${CLUSTER_ID}\", \"namespaces\": [\"vulnerable-workload-{workshop_user_suffix}\"]}" \
+  | jq .
+----
+
+Expect `"success": true`. If the cluster list has more than one entry, set `CLUSTER_ID` to this cluster's id and run the PUT again.
+
+In *Risk*, baselines for deployments in `vulnerable-workload-{workshop_user_suffix}` show as locked.
+====
+
+== What you learned
+
+* An unlocked baseline learns. A locked baseline alerts when a new process starts.
+* The API can lock every baseline in a namespace in one call.
+* Image hardening, the deny-egress policy from exercise 2, and process baselining are three separate controls.
+
+xref:ROOT:index.adoc[Return to the roadshow home page].

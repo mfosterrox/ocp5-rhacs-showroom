@@ -3,6 +3,7 @@ title: Red Hat OpenShift Security Roadshow
 version: master
 nav:
   - modules/ROOT/nav.adoc
+  - modules/security-response/nav.adoc
 
 asciidoc:
   attributes:

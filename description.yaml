@@ -52,6 +52,11 @@ The following components are pre-installed:
 ** VM, storage, and network isolation
 ** Host firmware and kernel controls from the link:https://access.redhat.com/sites/default/files/attachments/rh-openshift-virtualization-hardening-guide-detail-202512-en.pdf[Red Hat OpenShift Virtualization hardening guide^]
 
+* *OpenShift Security Response*
+** Audit the payment-gateway exec, isolate egress, and take a CRIU checkpoint
+** Roll the hardened Socket.IO image for CVE-2025-61765
+** Lock RHACS process baselines in the console and through the API
+
 * *Lightwell and Trusted Software Supply Chain*
 ** Hummingbird verification and Lightwell remediated pins
 ** Hermetic build, keyless signing, and GitOps admission

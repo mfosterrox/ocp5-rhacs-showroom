@@ -1,0 +1,114 @@
+= 2. The Incident
+:toc:
+:toclevels: 1
+:icons: font
+
+xref:index.adoc[← Security response overview]
+
+== Overview
+
+It is 02:14. Morgan pages Sarah. Anomaly detection flagged irregular egress from a `payment-gateway` namespace on the production cluster. Morgan's instruction is to leave the pod running. Restarting it would drop the in-memory evidence. The first questions are who opened the shell, and how to cut off the egress without destroying that evidence.
+
+image::fsi-security/sarah-call.png[Incident call,link=self, window=blank, width=100%]
+
+== Your mission
+
+Find the exec in the API audit log, confirm the external connection in RHACS, apply a deny-egress NetworkPolicy, and collect audit logs with `must-gather`.
+
+Use the *Terminal* tab for the commands below.
+
+.Search control-plane audit logs for the exec
+[%collapsible]
+====
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+namespace=payment-gateway-{workshop_user_suffix}
+
+for master in $(oc get nodes --selector node-role.kubernetes.io/master --output name); do
+  echo "=== Searching logs on ${master} ==="
+  oc adm node-logs "${master}" --path=kube-apiserver/audit.log \
+    | jq --arg ns "${namespace}" 'first(select(.objectRef.namespace == $ns
+          and .objectRef.name == "payment-gateway"
+          and .verb == "create"
+          and .objectRef.subresource == "exec"))'
+done
+----
+
+Read the event you get back:
+
+* `user.username` is `system:serviceaccount:payment-gateway-{workshop_user_suffix}:cicd-pipeline-runner-sa`
+* `responseStatus.code` is `101` (the API server upgraded the connection; the exec succeeded)
+* `requestURI` shows an exec into the `httpd` container
+* `annotations` name the RoleBinding that allowed that service account to exec
+
+The pipeline account is only supposed to push manifests. It had permission to exec into a live pod.
+====
+
+.Confirm the external connection in RHACS
+[%collapsible]
+====
+. In RHACS, open *Network Graph*.
+. Filter to namespace `payment-gateway-{workshop_user_suffix}` and deployment `payment-gateway`.
+. Open *External Entities* and find the connection to `185.199.108.153`.
+
+image::fsi-security/rhacs-filters.png[RHACS network graph filters,link=self, window=blank, width=100%]
+
+image::fsi-security/rhacs-externalip.png[External connections in RHACS,link=self, window=blank, width=100%]
+
+Sign in with the RHACS username and password on the xref:ROOT:index.adoc[home page].
+====
+
+.Deny egress from the payment gateway
+[%collapsible]
+====
+This is a break-glass change during an active incident. Leave the pod running.
+
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: payment-gateway-deny-egress
+  namespace: payment-gateway-{workshop_user_suffix}
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-gateway
+  policyTypes:
+    - Egress
+  egress: []
+EOF
+----
+
+image::fsi-security/apply-networkpolicy.png[Deny egress NetworkPolicy,link=self, window=blank, width=100%]
+
+An empty `egress` list denies all egress from pods labeled `app=payment-gateway`. Return to the Network Graph and confirm the external connection drops while the pod stays up.
+
+NetworkPolicy reference: {docs-networkpolicy-url}[{docs-networkpolicy-url}^].
+====
+
+.Collect audit logs for the support case
+[%collapsible]
+====
+In a real incident you would attach this bundle to a support case. Here, practice the collection and leave the case unopened.
+
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc adm must-gather \
+  --run-namespace=payment-gateway-{workshop_user_suffix} \
+  --dest-dir=/tmp/incident-artifacts \
+  -- /usr/bin/gather_audit_logs
+find /tmp/incident-artifacts -type d -name 'audit_logs' -print
+----
+
+image::fsi-security/sarah-support.png[Preparing audit logs for support,link=self, window=blank, width=100%]
+====
+
+== What you learned
+
+* API audit attributes an exec to a service account, not just a pod name.
+* A deny-egress NetworkPolicy contains the workload without deleting the process you still need to inspect.
+* `oc adm must-gather` packages audit logs so someone else can review them.
+
+Next: xref:sr-03-forensics.adoc[3. Forensic investigation].

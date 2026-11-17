@@ -60,6 +60,24 @@ When setup exits 0 and the follow-up checks pass, the host prints `up to date an
 
 Setup can take many minutes because it waits for the RHEL webserver VM. `--timeout` defaults to 3600 seconds. `--workers` defaults to 5.
 
+## Refresh the security response snapshot
+
+The OpenShift security response track is rendered from `content/modules/security-response`. Upstream source is a filtered snapshot in `vendor/security-response`, taken from the GitHub fork of [jmhbnz/workshops](https://github.com/jmhbnz/workshops).
+
+The fork for this account is [mfosterrox/workshops](https://github.com/mfosterrox/workshops). `jmhbnz/workshops` stays the parent. To pull new commits into the fork and refresh the snapshot:
+
+```bash
+updates/sync-security-response.sh
+```
+
+The script syncs the fork from `jmhbnz/workshops` when `gh` can see that fork, sparse-clones it, and copies an allowlist. It records the commit in `vendor/security-response/UPSTREAM`.
+
+It does not edit Showroom pages. After it runs, review the snapshot and update `content/modules/security-response` by hand.
+
+`SECURITY_RESPONSE_REPO` overrides the fork (`owner/name`). `UPSTREAM_SLUG` overrides the parent (default `jmhbnz/workshops`).
+
+The snapshot omits `exercise4.mdx` and `setup/exercise4/exploit/`.
+
 ## Logs
 
 Stdout is a short status per bastion. Full remote output is written to `updates/logs/<guid>-<port>.log`. Both scripts append a summary to `updates/results.log`. The process exits non-zero when any bastion fails.
