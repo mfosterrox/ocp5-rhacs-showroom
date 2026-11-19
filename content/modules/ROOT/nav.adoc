@@ -56,6 +56,20 @@
 * xref:acs.adoc[ACS 5 Capabilities]
 * xref:index.adoc[Return to Welcome]
 
+.Lightwell Java rebuild
+* xref:lwjava-INDEX.adoc[Lightwell Java Workshop]
+* xref:lwjava-01-incident.adoc[1. See the vulnerable release]
+* xref:lwjava-02-proxy.adoc[2. Lightwell repositories]
+* xref:lwjava-03-pin.adoc[3. Pin the critical finding]
+* xref:lwjava-04-source.adoc[4. Update the source]
+* xref:lwjava-05-bind.adoc[5. Bind the Lightwell versions]
+* xref:lwjava-06-renovate.adoc[6. Match the Renovate change]
+* xref:lwjava-07-build.adoc[7. Rebuild and read the SBOM]
+* xref:lwjava-08-sign.adoc[8. Sign the new digest]
+* xref:lwjava-09-gitops.adoc[9. Let GitOps roll the deployment]
+* xref:lwjava-10-confirm.adoc[10. Confirm the patched release]
+* xref:index.adoc[Return to Welcome]
+
 .Secure Software Supply Chain with Red Hat Lightwell 
 * xref:tssc-INDEX.adoc[Lightwell TSSC Overview]
 * xref:tssc-01-hummingbird-verify.adoc[1.1 Verify Hummingbird]

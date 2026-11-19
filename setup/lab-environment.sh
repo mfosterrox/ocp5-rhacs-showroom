@@ -7,7 +7,9 @@
 # creates a Quay account token (QUAY_TOKEN), and installs TSSC CLIs
 # (cosign, oc-mirror, ec, and mvn).
 # Cluster-wide RHACS/Compliance/demo-app deploy is owned by OpenShift GitOps
-# (roadshow-prereqs + roadshow-demo-apps). This script also applies
+# (roadshow-prereqs + roadshow-demo-apps). The Lightwell Java vulnerable
+# release is the Argo CD Application lightwell-java. This script waits for
+# that Application. It does not oc apply that workload. This script also applies
 # rhel-webserver in rhacs-virt-webserver and the checkout-service and
 # ledger-service user-defined networks under setup/user-defined-network/.
 # rhel-webserver joins checkout-service with the checkout containers.
@@ -300,7 +302,7 @@ load_roadshow_env
 
 # Count top-level lab steps.
 TOTAL=0
-TOTAL=$((TOTAL + 8)) # admin + user-defined network + ACS MCP + quay env + tssc clis + CLI vars + verify API + ACS VM
+TOTAL=$((TOTAL + 9)) # admin + lightwell java + user-defined network + ACS MCP + quay env + tssc clis + CLI vars + verify API + ACS VM
 [[ "${SKIP_RHACS_CONFIGURE}" != true ]] && TOTAL=$((TOTAL + 1))
 [[ "${SKIP_DEMO_APPS}" != true ]] && TOTAL=$((TOTAL + 1)) # clone
 [[ "${SKIP_DEMO_APPS}" != true && "${SKIP_DEMO_APPLY}" != true ]] && TOTAL=$((TOTAL + 1)) # apply
@@ -478,6 +480,33 @@ do_verify_admin() {
   oc config use-context admin 2>/dev/null || oc config use-context "$(oc config get-contexts -o name | head -1)"
   oc whoami
   oc get nodes --no-headers | head -5
+}
+
+# The vulnerable Help I'm Vulnerable release is deployed by Argo CD
+# (Application lightwell-java). Wait until that release is ready.
+# Do not oc apply it here. Self-heal would fight a second deployer.
+do_wait_lightwell_java() {
+  local app="lightwell-java"
+  local gitops_ns="openshift-gitops"
+  local deploy_ns="help-im-vulnerable"
+  local i sync health
+  if ! oc -n "${gitops_ns}" get application "${app}" >/dev/null 2>&1; then
+    echo "NOTE: Argo CD Application ${app} is not on this cluster yet. Continuing."
+    return 0
+  fi
+  for i in $(seq 1 120); do
+    sync="$(oc -n "${gitops_ns}" get application "${app}" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+    health="$(oc -n "${gitops_ns}" get application "${app}" -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+    echo "lightwell-java sync=${sync:-unknown} health=${health:-unknown} (${i}/120)"
+    if [[ "${sync}" == "Synced" && "${health}" == "Healthy" ]]; then
+      oc -n "${deploy_ns}" rollout status deployment/help-im-vulnerable --timeout=180s
+      return 0
+    fi
+    sleep 15
+  done
+  echo "Error: Application ${app} did not become Synced and Healthy within 30 minutes." >&2
+  oc -n "${gitops_ns}" describe application "${app}" >&2 || true
+  return 1
 }
 
 do_wait_central() {
@@ -1650,6 +1679,7 @@ do_acs_vm() {
 }
 
 progress_run "Verify OpenShift access" do_verify_admin
+progress_run "Wait for Lightwell Java release" do_wait_lightwell_java
 progress_run "Deploy checkout and ledger networks" do_user_defined_network
 progress_run "Deploy rhel-webserver" do_acs_vm
 progress_run "Register ACS MCP with Lightspeed" lightspeed_ensure_acs_mcp

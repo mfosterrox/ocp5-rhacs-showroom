@@ -1,0 +1,90 @@
+= 3. Pin the critical finding
+:toc:
+:toclevels: 1
+
+== Overview
+
+You change the pom from the vulnerable coordinates to the Lightwell rebuilds. The Woodstox pin is the critical finding. The same edit pins the other rebuilds this application documents, so the new image is one consistent release.
+
+== Why it matters
+
+`6.0.3.rhlw-00001` is not a newer Woodstox minor. It is a rebuilt `6.0.3` with the backport for `CVE-2022-40152`. The application stays on the version line it already runs.
+
+== Versions to pin
+
+[cols="2,2,2",options="header"]
+|===
+|Coordinate |Vulnerable release |Lightwell pin
+
+|`org.springframework:spring-core`
+|`5.3.18`
+|`5.3.18.rhlw-00010`
+
+|`org.springframework:spring-expression`
+|`5.3.18`
+|`5.3.18.rhlw-00010`
+
+|`org.springframework:spring-webmvc`
+|`5.3.18`
+|`5.3.18.rhlw-00010`
+
+|`com.fasterxml.woodstox:woodstox-core`
+|`6.0.3`
+|`6.0.3.rhlw-00001`
+
+|`org.json:json`
+|`20220320`
+|`20220320.0.0.rhlw-00003`
+
+|`com.jayway.jsonpath:json-path`
+|`2.8.0`
+|`2.8.0.rhlw-00001`
+|===
+
+Leave every other dependency on its upstream version. Those libraries do not have a Lightwell fix in this demo.
+
+== Update pom.xml
+
+. Apply the six pins
++
+[source,bash,role=execute]
+----
+cd "${HOME}/help-im-vulnerable"
+python3 - <<'PY'
+from pathlib import Path
+path = Path("pom.xml")
+text = path.read_text()
+replacements = {
+    ">5.3.18<": ">5.3.18.rhlw-00010<",
+    ">6.0.3<": ">6.0.3.rhlw-00001<",
+    ">20220320<": ">20220320.0.0.rhlw-00003<",
+    ">2.8.0<": ">2.8.0.rhlw-00001<",
+}
+for old, new in replacements.items():
+    if old not in text:
+        raise SystemExit(f"missing {old}")
+    text = text.replace(old, new)
+path.write_text(text)
+print("pins updated")
+PY
+----
++
+Expected output:
++
+----
+pins updated
+----
+
+== Verify
+
+[source,bash,role=execute]
+----
+cd "${HOME}/help-im-vulnerable"
+grep -n -E 'rhlw-00010|rhlw-00001|rhlw-00003' pom.xml
+----
+
+Expected lines include `5.3.18.rhlw-00010`, `6.0.3.rhlw-00001`, `20220320.0.0.rhlw-00003`, and `2.8.0.rhlw-00001`.
+
+`git diff -- pom.xml` shows only those version changes.
+
+Continue with xref:lwjava-04-source.adoc[4. Update the source].

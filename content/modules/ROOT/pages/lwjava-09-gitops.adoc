@@ -1,0 +1,46 @@
+= 9. Let GitOps roll the deployment
+:toc:
+:toclevels: 1
+
+== Overview
+
+You do not create an Application and you do not `oc apply` a second copy of the workload. Application `lightwell-java` already owns the Deployment. Module 7 pointed it at the new digest. You confirm Argo CD is still Synced and the running pod is that digest.
+
+== Why it matters
+
+Self-heal would undo a second deployer. The Application ignores changes to the container image so a rebuilt digest can roll without a new manifest, and so self-heal does not put the vulnerable tag back.
+
+== Confirm the rollout
+
+. Argo CD is Synced, and the pod image is the new digest
++
+[source,bash,role=execute]
+----
+oc -n openshift-gitops get application lightwell-java \
+  -o jsonpath='sync={.status.sync.status}{"\n"}health={.status.health.status}{"\n"}'
+NEW="$(oc -n help-im-vulnerable get istag help-im-vulnerable:vulnerable -o jsonpath='{.image.dockerImageReference}')"
+OLD="$(oc -n help-im-vulnerable get configmap help-im-vulnerable-digest -o jsonpath='{.data.dockerImageReference}')"
+POD="$(oc -n help-im-vulnerable get pod -l app=help-im-vulnerable -o jsonpath='{.items[0].spec.containers[0].image}')"
+echo "old=${OLD}"
+echo "new=${NEW}"
+echo "pod=${POD}"
+test "${POD}" = "${NEW}"
+test "${POD}" != "${OLD}"
+oc -n help-im-vulnerable rollout status deployment/help-im-vulnerable --timeout=180s
+----
++
+Expected output includes:
++
+----
+sync=Synced
+health=Healthy
+deployment "help-im-vulnerable" successfully rolled out
+----
+
+`old=` is the vulnerable release recorded at install. `pod=` and `new=` match, and they are different from `old=`.
+
+== Verify
+
+Open the *OpenShift GitOps* tab. Application `lightwell-java` is Healthy and Synced. The Deployment image in the pod spec contains `@sha256:` and is not the value stored in `help-im-vulnerable-digest`.
+
+Continue with xref:lwjava-10-confirm.adoc[10. Confirm the patched release].

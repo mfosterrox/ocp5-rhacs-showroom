@@ -1,0 +1,62 @@
+= 5. Bind the Lightwell versions
+:toc:
+:toclevels: 1
+
+== Overview
+
+You confirm the Lightwell versions are the ones the build will resolve. Spring Framework is bound in `dependencyManagement`, because Spring Boot would otherwise keep `5.3.18`. Woodstox, `org.json`, and json-path are bound on their direct `dependency` entries.
+
+== Why it matters
+
+Spring Boot `2.6.6` manages Spring Framework `5.3.18`. Renovate's Maven manager does not see that managed version. This pom binds `spring-core`, `spring-expression`, and `spring-webmvc` in `dependencyManagement` so the rebuild cannot fall back to the vulnerable managed version. Woodstox, `org.json`, and json-path are direct dependencies, so their `version` elements are the bind.
+
+== Check the bound versions
+
+. Show the bound Lightwell versions
++
+[source,bash,role=execute]
+----
+cd "${HOME}/help-im-vulnerable"
+python3 - <<'PY'
+import xml.etree.ElementTree as ET
+ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+root = ET.parse("pom.xml").getroot()
+wanted = {
+    ("org.springframework", "spring-core"),
+    ("org.springframework", "spring-expression"),
+    ("org.springframework", "spring-webmvc"),
+    ("com.fasterxml.woodstox", "woodstox-core"),
+    ("org.json", "json"),
+    ("com.jayway.jsonpath", "json-path"),
+}
+found = []
+for dep in root.findall(".//m:dependency", ns):
+    group = dep.findtext("m:groupId", default="", namespaces=ns)
+    artifact = dep.findtext("m:artifactId", default="", namespaces=ns)
+    version = dep.findtext("m:version", default="", namespaces=ns)
+    if (group, artifact) in wanted:
+        found.append(f"{group}:{artifact}:{version}")
+print("\n".join(sorted(found)))
+if len(found) != 6:
+    raise SystemExit(f"expected 6 bound artifacts, found {len(found)}")
+PY
+----
++
+Expected output:
++
+----
+com.fasterxml.woodstox:woodstox-core:6.0.3.rhlw-00001
+com.jayway.jsonpath:json-path:2.8.0.rhlw-00001
+org.json:json:20220320.0.0.rhlw-00003
+org.springframework:spring-core:5.3.18.rhlw-00010
+org.springframework:spring-expression:5.3.18.rhlw-00010
+org.springframework:spring-webmvc:5.3.18.rhlw-00010
+----
+
+Spring Boot's parent still manages `5.3.18`. The `dependencyManagement` entries in this pom win for the three Spring artifacts. The other three versions are on the direct dependencies.
+
+== Verify
+
+The command prints six coordinates and every version contains `.rhlw-`.
+
+Continue with xref:lwjava-06-renovate.adoc[6. Match the Renovate change].

@@ -1,0 +1,68 @@
+= 7. Rebuild and read the SBOM
+:toc:
+:toclevels: 1
+
+== Overview
+
+You rebuild ImageStreamTag `help-im-vulnerable:vulnerable` from the working directory. The BuildConfig in Git still points at the vulnerable commit. This build replaces the tag with your pom. The CycloneDX plugin writes `/deployments/maven-sbom.json` into the image.
+
+== Why it matters
+
+The running Deployment follows this tag. A new digest on the tag is what GitOps rolls out in module 9. The SBOM is the record of which versions that digest contains.
+
+== Save the original digest
+
+. Read the digest GitOps recorded for the vulnerable release
++
+[source,bash,role=execute]
+----
+oc -n help-im-vulnerable get configmap help-im-vulnerable-digest \
+  -o jsonpath='{.data.dockerImageReference}{"\n"}' | tee "${HOME}/help-im-vulnerable-original.txt"
+----
+
+Keep that file. The rebuild must not reuse it.
+
+== Rebuild from your pom
+
+. Start a binary build from the edited source and wait for it
++
+[source,bash,role=execute]
+----
+cd "${HOME}/help-im-vulnerable"
+oc -n help-im-vulnerable start-build help-im-vulnerable --from-dir=. --follow
+----
+
+The build resolves artifacts from the Lightwell repositories in `.mvn/settings.xml`. The first rebuild downloads those jars, so this step can take several minutes.
+
+== Verify
+
+. The tag digest changed, and the SBOM names the Woodstox rebuild
++
+[source,bash,role=execute]
+----
+NEW="$(oc -n help-im-vulnerable get istag help-im-vulnerable:vulnerable -o jsonpath='{.image.dockerImageReference}')"
+OLD="$(cat "${HOME}/help-im-vulnerable-original.txt")"
+echo "old=${OLD}"
+echo "new=${NEW}"
+test "${NEW}" != "${OLD}"
+oc -n help-im-vulnerable set image deployment/help-im-vulnerable "app=${NEW}"
+oc -n help-im-vulnerable rollout status deployment/help-im-vulnerable --timeout=300s
+oc -n help-im-vulnerable exec deploy/help-im-vulnerable -- grep -o 'woodstox-core.*rhlw-00001' /deployments/maven-sbom.json | head -1
+----
++
+Expected output includes a new `@sha256:` value and:
++
+----
+woodstox-core
+----
+
+The `set image` line points the Deployment at the new digest now. Module 9 checks that Argo CD stays Synced after that change. The image trigger would also move the tag, and `ignoreDifferences` on the container image keeps self-heal from putting the old tag back.
+
+If `oc exec` cannot find `grep`, run:
+
+[source,bash,role=execute]
+----
+oc -n help-im-vulnerable exec deploy/help-im-vulnerable -- ls /deployments/maven-sbom.json
+----
+
+Continue with xref:lwjava-08-sign.adoc[8. Sign the new digest].
