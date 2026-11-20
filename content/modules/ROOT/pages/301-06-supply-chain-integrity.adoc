@@ -34,6 +34,9 @@ Inspect the UBI Python image, apply a digest-only ValidatingAdmissionPolicy to a
 
 Click each step for the full solution.
 
+:lab-run-module: 301-06
+include::partial$lab-run.adoc[]
+
 === Part A: Provenance of the catalog image
 
 .Show image info for registry.access.redhat.com/ubi9/python-311:latest filtered to linux/amd64. Expect a Digest sha256 line

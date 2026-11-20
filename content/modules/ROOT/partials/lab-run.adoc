@@ -1,0 +1,7 @@
+Run every solution step once, before cleanup. The terminal ends with your grade, such as `6/8`.
+
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+cd ~/ocp5-rhacs-showroom
+bash setup/lab-run.sh --module {lab-run-module}
+----

@@ -35,6 +35,9 @@ Build a Tekton path FROM `python-alpine-golden` that refuses unscanned or unsign
 
 Click each step for the full solution.
 
+:lab-run-module: 201-04
+include::partial$lab-run.adoc[]
+
 .Install podman with sudo dnf install -y podman. Expect the package installed, or already installed
 [%collapsible]
 ====

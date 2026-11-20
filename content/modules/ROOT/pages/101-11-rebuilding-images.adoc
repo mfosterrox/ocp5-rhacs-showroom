@@ -31,6 +31,9 @@ The public `httpd` image just crashed because it wants root and port 80 -- the s
 
 Click each step for the full solution.
 
+:lab-run-module: 101-11
+include::partial$lab-run.adoc[]
+
 .Create project 101-11-r-rebuild or switch to project 101-11-r-rebuild
 [%collapsible]
 ====

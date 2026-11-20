@@ -36,6 +36,9 @@ Prove A can reach B, apply labeled ANPs (allow DNS, allow intra-namespace, deny 
 
 Click each step for the full solution.
 
+:lab-run-module: 301-03
+include::partial$lab-run.adoc[]
+
 === Part A: Open path (101-05 reminder)
 
 .Get CRD adminnetworkpolicies.policy.networking.k8s.io and print network.operator cluster spec.defaultNetwork.type. Expect OVNKubernetes

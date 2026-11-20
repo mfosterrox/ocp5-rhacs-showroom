@@ -32,6 +32,9 @@ Find RoleBindings that grant DataVolume clone across namespaces, list VMs with `
 
 Click each step for the full solution.
 
+:lab-run-module: virt-05
+include::partial$lab-run.adoc[]
+
 === Control: Restrict access to cross-namespace DataVolume cloning (Level 1 Control)
 
 CDI allows a DataVolume in namespace D to clone from namespace S only when S contains a RoleBinding whose subject is a ServiceAccount in D and whose role includes `datavolumes/source`.

@@ -30,6 +30,9 @@ Prove restricted-plus is not enough for this workload: apply a tighter SCC, run 
 
 Click each step for the full solution.
 
+:lab-run-module: 201-02
+include::partial$lab-run.adoc[]
+
 .Show the first 40 lines of SCC restricted. Expect allowPrivilegedContainer: false and a non-root runAsUser strategy
 [%collapsible]
 ====

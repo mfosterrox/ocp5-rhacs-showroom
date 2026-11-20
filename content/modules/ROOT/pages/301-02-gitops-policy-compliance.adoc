@@ -36,6 +36,9 @@ Resolve the UBI Python digest, apply the in-repo manifests, prove the running im
 
 Click each step for the full solution.
 
+:lab-run-module: 301-02
+include::partial$lab-run.adoc[]
+
 === Part A: Catalog image
 
 .Open https://images.redhat.com/ and search Python / ubi9/python-311. Pull spec registry.access.redhat.com/ubi9/python-311, or registry.redhat.io when the cluster uses the entitlements registry

@@ -35,6 +35,9 @@ Wire ZTWIM and PostgreSQL so only cert-bearing workloads connect—then prove ba
 
 Click each step for the full solution.
 
+:lab-run-module: 301-08
+include::partial$lab-run.adoc[]
+
 .Run ~/ocp5-rhacs-showroom/setup/ztwim-lab/configure-ztwim-lab.sh until it reports "ZTWIM platform is ready", then run configure-ztwim-postgresql-lab.sh, then list pods in namespaces postgresql-spiffe and postgresql-spiffe-client. Expect 2/2 Running with a spiffe-helper sidecar, and client CN postgresql_spiffe
 [%collapsible]
 ====

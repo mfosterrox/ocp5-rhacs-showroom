@@ -39,6 +39,9 @@ Run a sandboxed workload and contrast it with a normal pod so you know when stro
 
 Click each step for the full solution.
 
+:lab-run-module: 201-09
+include::partial$lab-run.adoc[]
+
 .Get CSVs in openshift-sandboxed-containers matching sandbox, or print Install Sandboxed Containers Operator from OperatorHub
 [%collapsible]
 ====

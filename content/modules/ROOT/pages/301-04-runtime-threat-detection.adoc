@@ -33,6 +33,9 @@ Deploy a UBI probe (and reuse xref:301-02-gitops-policy-compliance.adoc[301-02] 
 
 Click each step for the full solution.
 
+:lab-run-module: 301-04
+include::partial$lab-run.adoc[]
+
 === Part A: Workload
 
 .Apply ~/ocp5-rhacs-showroom/setup/acs-runtime-lab/pkgmgr-probe.yaml, wait for deploy/pkgmgr-probe in namespace 301-04-runtime with timeout 120s, then print route central in namespace stackrox. Expect Running

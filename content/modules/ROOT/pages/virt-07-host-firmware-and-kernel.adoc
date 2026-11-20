@@ -34,6 +34,9 @@ Pick a worker, `oc debug` it, and score four controls. Leave MachineConfig YAML 
 
 Click each step for the full solution.
 
+:lab-run-module: virt-07
+include::partial$lab-run.adoc[]
+
 .List nodes with label node-role.kubernetes.io/worker
 [%collapsible]
 ====

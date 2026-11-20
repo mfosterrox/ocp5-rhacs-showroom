@@ -127,6 +127,9 @@ Stop the same attack without blocking legitimate work. Remove the over-permissio
 
 Click each step for the full solution.
 
+:lab-run-module: 101-03
+include::partial$lab-run.adoc[]
+
 .Delete RoleBindings broken-dev-admin, attacker-persist, and sa-too-much, and deployment foothold, then list RoleBindings. Expect those three bindings gone
 [%collapsible]
 ====

@@ -32,6 +32,9 @@ List VMs with GPUs, hostDevices, or overcommit. Confirm `rhel9-vm` is clean. Kno
 
 Click each step for the full solution.
 
+:lab-run-module: virt-04
+include::partial$lab-run.adoc[]
+
 === Control: Restrict pass-through of GPUs and host devices to the VM (Level 1 Control)
 
 Attaching a GPU, NVMe, or other host device maps that hardware into the guest. Performance goes up. So does the blast radius if the device firmware or driver is hostile.

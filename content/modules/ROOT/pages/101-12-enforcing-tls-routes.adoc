@@ -30,6 +30,9 @@ Stand up an app, prove HTTP is readable, issue a certificate with cert-manager, 
 
 Click each step for the full solution.
 
+:lab-run-module: 101-12
+include::partial$lab-run.adoc[]
+
 === Part A: Start with an application
 Deploy a UBI httpd app, expose it on HTTP, and capture the Route hostname. That hostname is the name you will put on the certificate.
 

@@ -34,6 +34,9 @@ Confirm Splunk is up (reinstall if 201-07 cleanup tore it down), generate an exe
 
 Click each step for the full solution.
 
+:lab-run-module: 301-05
+include::partial$lab-run.adoc[]
+
 === Part A: SIEM still there?
 
 .Print route splunk-web in namespace splunk, or if it is missing run ~/ocp5-rhacs-showroom/setup/splunk-lab/install.sh with SPLUNK_RUN_CLEAN_FIRST=false, then print the route and decode secret splunk-auth key password. Sign in as admin

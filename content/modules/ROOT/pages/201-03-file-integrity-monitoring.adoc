@@ -82,6 +82,9 @@ Turn on File Integrity Operator for worker nodes so a silent binary or config ch
 
 Click each step for the full solution.
 
+:lab-run-module: 201-03
+include::partial$lab-run.adoc[]
+
 .Apply Namespace openshift-file-integrity with openshift.io/cluster-monitoring=true and pod-security.kubernetes.io enforce, audit, and warn privileged, OperatorGroup file-integrity-operator, and Subscription file-integrity-operator on channel stable from redhat-operators with installPlanApproval Automatic
 [%collapsible]
 ====

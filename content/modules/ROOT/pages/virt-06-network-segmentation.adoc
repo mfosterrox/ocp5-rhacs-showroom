@@ -32,6 +32,9 @@ Inventory NetworkAttachmentDefinitions and SriovNetworks, then apply one OVN-Kub
 
 Click each step for the full solution.
 
+:lab-run-module: virt-06
+include::partial$lab-run.adoc[]
+
 === Control: Use dedicated VLANs to segment network traffic (Level 2 Control)
 
 Put VM secondary interfaces on separate VLANs (OVN localnet `vlanID`, SR-IOV `spec.vlan`, or bridge CNI `vlan`) so guests are not on one L2 broadcast domain.
