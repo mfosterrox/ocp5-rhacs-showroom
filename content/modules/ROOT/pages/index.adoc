@@ -58,7 +58,7 @@ TIP: Using the Showroom allows you to move through the console tabs while you wo
 === Red Hat^(R)^ OpenShift Container Platform (OCP)
 
 . Open the *OpenShift Console* tab (or go to `{openshift_cluster_console_url}`).
-. Sign in with the credentials below.
+. Sign in with the credentials below. This is the Keycloak login the other consoles share.
 
 [cols="1,1"]
 |===
@@ -70,7 +70,7 @@ TIP: Using the Showroom allows you to move through the console tabs while you wo
 === Red Hat^(R)^ Advanced Cluster Security (RHACS)
 
 . Open the *Red Hat Advanced Cluster Security* tab (or go to `{acs_route}[{acs_route}^]`).
-. Sign in with the credentials below.
+. Choose *Keycloak* and sign in as `{acs_portal_username}`. The local password below still works for the UI and for `roxctl`.
 
 [cols="1,1"]
 |===
@@ -82,7 +82,7 @@ TIP: Using the Showroom allows you to move through the console tabs while you wo
 === OpenShift GitOps (Argo CD)
 
 . Open the *OpenShift GitOps* tab (or go to `{openshift_gitops_url}[{openshift_gitops_url}^]`).
-. Sign in with the credentials below.
+. Choose *Log in via OpenShift* and sign in as `{openshift_gitops_user}`. The local admin password below still works.
 
 [cols="1,1"]
 |===
@@ -93,7 +93,7 @@ TIP: Using the Showroom allows you to move through the console tabs while you wo
 
 === SSO (Keycloak)
 
-TSSC identity for RHTPA. Open the *SSO (Keycloak)* tab (or go to `{keycloak_url}/admin/[{keycloak_url}/admin/^]`). Use `tpa-user` on the RHTPA tab — not this admin console — when the lab asks you to sign in to Trusted Profile Analyzer.
+Workshop Keycloak admin console. Product sign-in uses the same Keycloak page as the OpenShift console, not this admin tab. Open the *SSO (Keycloak)* tab (or go to `{keycloak_url}/admin/[{keycloak_url}/admin/^]`) only when a module asks for the Keycloak admin. Use `tpa-user` on the RHTPA tab when the lab asks you to sign in to Trusted Profile Analyzer.
 
 [cols="1,1"]
 |===
@@ -107,7 +107,7 @@ TSSC identity for RHTPA. Open the *SSO (Keycloak)* tab (or go to `{keycloak_url}
 === Red Hat Trusted Profile Analyzer (RHTPA)
 
 . Open the *RHTPA* tab (or go to `{rhtpa_url}[{rhtpa_url}^]`).
-. Sign in with the TPA user (Keycloak realm `tpa`).
+. Sign in with Keycloak as `{rhtpa_username}`. The password is the same workshop password.
 
 [cols="1,1"]
 |===
@@ -119,7 +119,7 @@ TSSC identity for RHTPA. Open the *SSO (Keycloak)* tab (or go to `{keycloak_url}
 === Gitea
 
 . Open the *Gitea* tab (or go to `{gitea_url}[{gitea_url}^]`).
-. Sign in with the credentials below.
+. Choose *Keycloak* and sign in as `{gitea_username}`. Git clone over HTTPS still uses the local password below.
 
 [cols="1,1"]
 |===
@@ -131,12 +131,13 @@ TSSC identity for RHTPA. Open the *SSO (Keycloak)* tab (or go to `{keycloak_url}
 === Red Hat Developer Hub
 
 . Open the *Developer Hub* tab (or go to `{rhdh_url}[{rhdh_url}^]`).
-. Choose *Guest* — Developer Hub has no workshop password.
+. Sign in with Keycloak as `{openshift_cluster_admin_username}`.
 
 [cols="1,1"]
 |===
 |Console URL| {rhdh_url}[{rhdh_url}^]
-|Sign-in| Guest (no password)
+|Username| {openshift_cluster_admin_username}
+|Password| {openshift_cluster_admin_password}
 |===
 
 === Showroom Terminal
