@@ -1,5 +1,6 @@
 = Notifications, API, and Integrations
 :toc:
+:toclevels: 1
 :sectnums:
 :icons: font
 
@@ -101,7 +102,7 @@ IMPORTANT: Run the following command if you have not created the policy in xref:
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-cat <<EOF | oc apply -n stackrox -f -
+cat <<EOF | oc apply -n rhacs-operator -f -
 apiVersion: config.stackrox.io/v1alpha1
 kind: SecurityPolicy
 metadata:
@@ -173,7 +174,7 @@ The setup script already exported `ROX_API_TOKEN` and `ROX_CENTRAL_ADDRESS`. You
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-oc -n stackrox get route central -o jsonpath='{.spec.host}{"\n"}'
+oc -n rhacs-operator get route central -o jsonpath='{.spec.host}{"\n"}'
 echo "ROX_CENTRAL_ADDRESS=$ROX_CENTRAL_ADDRESS"
 test -n "$ROX_API_TOKEN" && echo "ROX_API_TOKEN is set" || echo "ROX_API_TOKEN is missing"
 ----
@@ -216,14 +217,14 @@ We need alerts on Unauthorized Process Execution for payment gateway—same patt
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Configure a notifier integration
+.In Platform Configuration, Integrations, create or reuse a Slack, Teams, or email notifier
 [%collapsible]
 ====
 . In RHACS, go to *Platform Configuration* → *Integrations*.
 . Create or reuse a notifier (Slack, Teams, or email) following the steps earlier in this module.
 ====
 
-.Step 2 — Create a notification rule
+.Create a notification rule for Unauthorized Process Execution, severity High or above, namespace payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
 . Create a notification rule targeting:
@@ -232,18 +233,16 @@ include::partial$security-exercise-task-intro.adoc[]
 ** Scope: namespace `payment-gateway-{workshop_user_suffix}`
 ====
 
-.Step 3 — Trigger a test violation
+.Exec /bin/bash -c "echo notification test" on pod/payment-gateway in namespace payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
-. Trigger a test by running shell exec:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec -n payment-gateway-{workshop_user_suffix} -it pod/payment-gateway -- /bin/bash -c "echo notification test"
 ----
 ====
 
-.Step 4 — Confirm the alert fired
+.Confirm the violation in Violations and that the notifier fires
 [%collapsible]
 ====
 . Confirm the violation appears in RHACS *Violations* and that your notifier fires.

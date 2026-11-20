@@ -3,12 +3,13 @@
 :skills: NAD VLAN, MAC SpoofChk, MultiNetworkPolicy
 :labid: LAB-VIRT-06
 :toc:
+:toclevels: 1
 :icons: font
 
-**Duration:** ~30 minutes
+**Duration:** ~15 minutes
 
 == Overview
-xref:virt-05-storage-isolation.adoc[virt-05] isolated disks. This module isolates L2. The hardening guide wants dedicated VLANs (Level 2), MAC spoof filtering (Level 1), and MultiNetworkPolicy microsegmentation inside a VLAN (Level 2, OVN-Kubernetes localnet).
+xref:virt-05-storage-isolation.adoc[virt-05] isolated disks. This module isolates L2. The link:https://access.redhat.com/sites/default/files/attachments/rh-openshift-virtualization-hardening-guide-detail-202512-en.pdf[Red Hat OpenShift Virtualization hardening guide^] wants dedicated VLANs (Level 2), MAC spoof filtering (Level 1), and MultiNetworkPolicy microsegmentation inside a VLAN (Level 2, OVN-Kubernetes localnet).
 
 Pod `NetworkPolicy` from xref:101-05-network-policy-basics.adoc[101-05] and cluster xref:301-03-multi-tenant-zero-trust-network.adoc[AdminNetworkPolicy] do not replace secondary-network policy on Multus/localnet. VMs on extra networks need NADs, spoof checking, and MultiNetworkPolicy.
 
@@ -22,19 +23,19 @@ Two VMs on the same bridge see each other's broadcasts. MAC spoofing is a classi
 * A VLAN that is "isolated" but still allows every MAC on that VLAN to talk
 
 == Your Mission
-Inventory NetworkAttachmentDefinitions and SriovNetworks. Parse each NAD `spec.config` JSON for `vlanID` / `vlan` and MAC spoof fields. If the cluster has no secondary network yet, that is the default (VLANs are opt-in): you still leave with the YAML you would apply in production. Do not attach a new network to `rhel-webserver` in this lab.
+Inventory NetworkAttachmentDefinitions and SriovNetworks, then apply one OVN-Kubernetes localnet VLAN and one MultiNetworkPolicy in `rhacs-virt`. That pair is what a hardened VLAN looks like in the API. Do not attach the network to `rhel9-vm`, and do not create a node bridge mapping. This shared cluster has no physical VLAN 100.
 
 === Prerequisites
 
 * xref:virt-05-storage-isolation.adoc[virt-05] complete
-* `jq` on the bastion
 * OVN-Kubernetes is the usual default CNI; SR-IOV and bridge NADs are optional
 
-Click each step only if you need a hint.
+Click each step for the full solution.
 
-=== Control: Use dedicated VLANs to segment network traffic
+:lab-run-module: virt-06
+include::partial$lab-run.adoc[]
 
-**Level:** 2
+=== Control: Use dedicated VLANs to segment network traffic (Level 2 Control)
 
 Put VM secondary interfaces on separate VLANs (OVN localnet `vlanID`, SR-IOV `spec.vlan`, or bridge CNI `vlan`) so guests are not on one L2 broadcast domain.
 
@@ -44,65 +45,84 @@ Put VM secondary interfaces on separate VLANs (OVN localnet `vlanID`, SR-IOV `sp
 
 *Default:* Dedicated VLANs are not configured. No VM has a VLAN until you create a NAD or SriovNetwork.
 
-.Audit NAD and SR-IOV VLAN IDs
+.List each NetworkAttachmentDefinition namespace, name, type, and VLAN, then list SriovNetwork spec.vlan. Expect openshift-ovn-kubernetes/default with VLAN -. Expect mcp-demo-network/sriov-network with VLAN 0. VLAN 0 is untagged. A dedicated VLAN is a number other than 0 or -. rhacs-virt/vlan-100 with VLAN 100 appears after the next step
 [%collapsible]
 ====
-`spec.config` on a NetworkAttachmentDefinition is a *string* of JSON. Parse it.
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc get network-attachment-definitions.k8s.cni.cncf.io -A -o json | jq -r '
+  ["NAMESPACE","NAME","TYPE","VLAN"],
+  (.items[]
+   | (.spec.config | if type == "string" then fromjson? // {} else . // {} end) as $c
+   | [ .metadata.namespace,
+       .metadata.name,
+       ($c.type // "-"),
+       (if $c.vlanID != null then ($c.vlanID | tostring)
+        elif $c.vlan != null then ($c.vlan | tostring)
+        else "-" end) ])
+  | @tsv
+' | column -t
+----
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-oc get networkattachmentdefinition -A -o json | jq -c '
-  .items[]
-  | {
-      ns: .metadata.namespace,
-      name: .metadata.name,
-      config: (.spec.config | fromjson? // .spec.config)
-    }
-'
 echo '--- sriovnetwork vlan ---'
-oc get sriovnetwork -A -o json 2>/dev/null | jq -c '
-  .items[]? | {ns: .metadata.namespace, name: .metadata.name, vlan: .spec.vlan}
-' || echo "SriovNetwork CRD not installed (skip SR-IOV audit)"
+SRIOV_JSON="$(oc get sriovnetwork -A -o json 2>/dev/null)" || SRIOV_JSON=""
+if [[ -z "${SRIOV_JSON}" ]]; then
+  echo "No SriovNetwork CRD. A type=sriov row in the table above already shows that network's VLAN."
+elif [[ "$(printf '%s' "${SRIOV_JSON}" | jq '.items | length')" == "0" ]]; then
+  echo "No SriovNetworks."
+else
+  printf '%s' "${SRIOV_JSON}" | jq -r '
+    .items[]
+    | "\(.metadata.namespace)/\(.metadata.name)  vlan=\(.spec.vlan // "none")"
+  '
+fi
 ----
-
-TIP: Note each `vlanID` / `vlan`. `null` or missing VLAN on a secondary net that VMs use is a Level 2 finding. Zero NADs means you have not opted in yet; plan VLANs before you attach production VMs to a bridge.
 ====
 
-.Remediation (apply when you have a real secondary network)
+.Apply NetworkAttachmentDefinition vlan-100 in rhacs-virt with cniVersion 0.3.1, name vlan-100, type ovn-k8s-cni-overlay, topology localnet, netAttachDefName rhacs-virt/vlan-100, and vlanID 100, then show the VLAN table. Expect row rhacs-virt vlan-100 ovn-k8s-cni-overlay 100. Leave rhel9-vm on the pod network
 [%collapsible]
 ====
-Examples (replace `phy-net`, `vlanID`, and namespace). Do not apply blindly if the physical network is not ready.
-
-OVN-Kubernetes localnet:
-
-[source,yaml]
+[source,bash,subs="+macros,+attributes",role=execute]
 ----
+oc apply -f - <<'EOF'
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
   name: vlan-100
-  namespace: default
+  namespace: rhacs-virt
 spec:
   config: |-
     {
       "cniVersion": "0.3.1",
+      "name": "vlan-100",
       "type": "ovn-k8s-cni-overlay",
       "topology": "localnet",
-      "netAttachDefName": "default/vlan-100",
+      "netAttachDefName": "rhacs-virt/vlan-100",
       "vlanID": 100
     }
+EOF
 ----
 
-Bridge CNI should set `"vlan": 100` and `"preserveDefaultVlan": false`. SR-IOV uses `spec.vlan: 100` on `SriovNetwork`.
-
-Docs: link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/virtualization/virt-connecting-a-virtual-machine-to-a-linux-bridge[VLAN with bridge CNI^], link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/virtualization/virt-connecting-a-virtual-machine-to-an-ovn-kubernetes-secondary-network[OVN localnet^], link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/networking/hardware-networks#nw-sriov-network-attachment_configuring-sriov-net-attach[SR-IOV networks^].
-
-TIP: After you create a NAD, attach it only to VMs that should sit on that VLAN. Leave `rhel-webserver` on its current network unless you are on a cluster you own and have a change window.
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc get network-attachment-definitions.k8s.cni.cncf.io -A -o json | jq -r '
+  ["NAMESPACE","NAME","TYPE","VLAN"],
+  (.items[]
+   | (.spec.config | if type == "string" then fromjson? // {} else . // {} end) as $c
+   | [ .metadata.namespace,
+       .metadata.name,
+       ($c.type // "-"),
+       (if $c.vlanID != null then ($c.vlanID | tostring)
+        elif $c.vlan != null then ($c.vlan | tostring)
+        else "-" end) ])
+  | @tsv
+' | column -t
+----
 ====
 
-=== Control: Enable MAC spoof filtering
-
-**Level:** 1
+=== Control: Enable MAC spoof filtering (Level 1 Control)
 
 Spoof checking drops frames whose source MAC is not the MAC allocated to that VM port.
 
@@ -112,38 +132,87 @@ Spoof checking drops frames whose source MAC is not the MAC allocated to that VM
 
 *Default:* OVN-Kubernetes localnet enables MAC spoof filtering. Bridge and SR-IOV must be turned on in the NAD or SriovNetwork.
 
-.Audit spoof check
+.Audit SriovNetwork spec.spoofChk and each NetworkAttachmentDefinition spoof field. Expect no SriovNetwork CRD. Expect mcp-demo-network/sriov-network pass with spoofchk omitted. Expect openshift-ovn-kubernetes/default skip. After vlan-100 exists, expect rhacs-virt/vlan-100 pass because OVN localnet filters spoofed MACs and macspoofchk is absent. A line that starts with gap: is the finding. Unset by itself is not a finding
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-echo '=== SR-IOV spoofChk (expect on) ==='
-oc get sriovnetwork -A -o json 2>/dev/null | jq -c '
-  .items[]? | {name: .metadata.name, spoofChk: .spec.spoofChk}
-' || echo "no SriovNetwork"
-
-echo '=== NAD config macspoofchk / macSpoofChk ==='
-oc get networkattachmentdefinition -A -o json | jq -c '
-  .items[]
-  | {ns: .metadata.namespace, name: .metadata.name, config: (.spec.config | fromjson? // {})}
-  | {ns, name, macspoofchk: (.config.macspoofchk // .config.macSpoofChk // .config.ipam.macspoofchk // "see raw config")}
-'
+echo '=== SR-IOV spoofChk ==='
+SRIOV_JSON="$(oc get sriovnetwork -A -o json 2>/dev/null)" || SRIOV_JSON=""
+if [[ -z "${SRIOV_JSON}" ]]; then
+  echo "No SriovNetwork CRD, so there is no spec.spoofChk to read."
+  echo "A type=sriov row is judged from its NetworkAttachmentDefinition spoofchk field below."
+elif [[ "$(printf '%s' "${SRIOV_JSON}" | jq '.items | length')" == "0" ]]; then
+  echo "No SriovNetworks."
+else
+  printf '%s' "${SRIOV_JSON}" | jq -r '
+    .items[]
+    | (.spec.spoofChk // "omitted") as $s
+    | if $s == "off" then
+        "\(.metadata.namespace)/\(.metadata.name)  gap: spoofChk is off."
+      elif $s == "on" then
+        "\(.metadata.namespace)/\(.metadata.name)  pass: spoofChk is on."
+      else
+        "\(.metadata.namespace)/\(.metadata.name)  pass: spoofChk is omitted. The SR-IOV default is on."
+      end
+  '
+fi
 ----
 
-TIP: SR-IOV `spoofChk` should be `on`. Bridge NADs should set mac spoof check true. OVN localnet is on by default even if the JSON omits the key.
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+echo '=== NAD spoof check ==='
+NAD_JSON="$(oc get network-attachment-definitions.k8s.cni.cncf.io -A -o json 2>/dev/null)" || NAD_JSON=""
+if [[ -z "${NAD_JSON}" ]]; then
+  echo "NetworkAttachmentDefinition CRD is not installed. No secondary networks to audit."
+elif [[ "$(printf '%s' "${NAD_JSON}" | jq '.items | length')" == "0" ]]; then
+  echo "No NetworkAttachmentDefinitions."
+else
+  printf '%s' "${NAD_JSON}" | jq -r '
+    .items[]
+    | . as $item
+    | (.spec.config | if type == "string" then fromjson? // {} else . // {} end) as $c
+    | ($item.metadata.namespace + "/" + $item.metadata.name) as $id
+    | if $id == "openshift-ovn-kubernetes/default" then
+        "\($id)  skip: cluster pod network. An unset macspoofchk here is not this control."
+      elif $c.type == "bridge" then
+        if $c.macspoofchk == true then
+          "\($id)  pass: bridge macspoofchk is true."
+        else
+          "\($id)  gap: bridge macspoofchk must be true. Found \(if $c.macspoofchk == null then "unset" else ($c.macspoofchk | tostring) end). Bridge defaults to false when the key is missing."
+        end
+      elif $c.type == "sriov" then
+        ($c.spoofchk // $c.spoofChk // "omitted") as $s
+        | if ($s == "off" or $s == false) then
+            "\($id)  gap: SR-IOV spoofchk is off."
+          elif ($s == "on" or $s == true) then
+            "\($id)  pass: SR-IOV spoofchk is on."
+          else
+            "\($id)  pass: spoofchk is omitted, so the SR-IOV plugin keeps spoof checking on. macspoofchk is a bridge field and stays unset on this network."
+          end
+      elif ($c.type == "ovn-k8s-cni-overlay" and $c.topology == "localnet") then
+        "\($id)  pass: OVN localnet filters spoofed MACs by default. A missing macspoofchk key is expected."
+      elif $c.type == "ovn-k8s-cni-overlay" then
+        "\($id)  skip: OVN overlay, not a localnet VLAN."
+      else
+        "\($id)  review: type=\($c.type // "unknown"). Check that provider spoof field."
+      end
+  '
+fi
+----
 ====
 
-.Remediation
+.Where the audit printed gap:, set bridge macspoofchk true, or set SR-IOV spoofchk on in the NetworkAttachmentDefinition, or set spec.spoofChk on on the SriovNetwork. Leave OVN localnet unchanged
 [%collapsible]
 ====
-Enable spoof check in the NAD or SriovNetwork for that provider. See link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/networking/hardware-networks[SR-IOV CNI^] and the bridge CNI NAD `macspoofchk` field in link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/networking/multiple-networks[multiple networks^].
+Enable spoof check only where the audit printed `gap:`.
 
-TIP: Re-run the audit after you change a NAD. Existing VM attachments may need a restart to pick up CNI config.
+Bridge NAD: set `"macspoofchk": true`. SR-IOV: set `"spoofchk": "on"` in the NAD, or `spec.spoofChk: on` on the `SriovNetwork`. Leave OVN localnet unchanged. It already filters spoofed MACs.
+
+See link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/networking/hardware-networks[SR-IOV CNI^] and the bridge CNI NAD `macspoofchk` field in link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/networking/multiple-networks[multiple networks^].
 ====
 
-=== Control: Use MultiNetworkPolicy
-
-**Level:** 2
+=== Control: Use MultiNetworkPolicy (Level 2 Control)
 
 MultiNetworkPolicy selects a VM *and* the NetworkAttachmentDefinition it uses, then allows only listed ingress/egress on that secondary network. After the first policy in a namespace matches a VM+NAD pair, everything else on that network is denied.
 
@@ -151,52 +220,76 @@ MultiNetworkPolicy selects a VM *and* the NetworkAttachmentDefinition it uses, t
 
 *Cons / impact:* A partial policy can isolate a VM from DNS, backup, or its application peers. You must allow what you still need. Feature is tied to OVN-Kubernetes localnet.
 
-*Default:* No MultiNetworkPolicy objects. The feature is off until you create policies.
+*Default:* `useMultiNetworkPolicy` is false. The `MultiNetworkPolicy` kind is not registered, so apply fails with `no matches for kind "MultiNetworkPolicy" in version "k8s.cni.cncf.io/v1beta1"`.
 
-.Audit MultiNetworkPolicy
+.Check CRD multi-networkpolicies.k8s.cni.cncf.io, then list multi-networkpolicy. Expect the CRD missing and oc apply failing with no matches for kind MultiNetworkPolicy in version k8s.cni.cncf.io/v1beta1, or the CRD installed and allow-same-vlan not listed yet
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-oc get multi-networkpolicy -A 2>/dev/null || echo "MultiNetworkPolicy CRD not available"
+if oc get crd multi-networkpolicies.k8s.cni.cncf.io >/dev/null 2>&1; then
+  echo "MultiNetworkPolicy CRD is installed."
+  oc get multi-networkpolicy -A
+  echo "An empty list means the feature is on and allow-same-vlan does not exist yet."
+else
+  echo "MultiNetworkPolicy CRD is not installed."
+  echo "oc apply fails with: no matches for kind \"MultiNetworkPolicy\" in version \"k8s.cni.cncf.io/v1beta1\"."
+  echo "That is the default. The next step sets useMultiNetworkPolicy: true, which installs this API."
+fi
 ----
-
-TIP: Empty is the default. The hardened *goal* is at least one policy per namespace that has VMs on a secondary network, matching both the VM and the NAD. Primary-network-only VMs (like a default `rhel-webserver`) are covered by NetworkPolicy/ANP, not this CR.
 ====
 
-.Remediation
+.Patch network.operator.openshift.io cluster so spec.useMultiNetworkPolicy is true, then wait for CRD multi-networkpolicies.k8s.cni.cncf.io. Expect network.operator.openshift.io/cluster patched and the CRD present
 [%collapsible]
 ====
-Create MultiNetworkPolicy in the project that owns the VM. The policy must match the VM and the NAD. See link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/networking/multiple-networks#nw-multus-multi-network-policy[MultiNetworkPolicy^].
-
-Example shape (names and labels must match your NAD):
-
-[source,yaml]
+[source,bash,subs="+macros,+attributes",role=execute]
 ----
+oc patch network.operator.openshift.io cluster --type=merge --patch '{"spec":{"useMultiNetworkPolicy":true}}'
+echo "Waiting for the MultiNetworkPolicy CRD..."
+for i in $(seq 1 36); do
+  if oc get crd multi-networkpolicies.k8s.cni.cncf.io >/dev/null 2>&1; then
+    echo "MultiNetworkPolicy CRD is installed."
+    break
+  fi
+  sleep 5
+done
+oc get crd multi-networkpolicies.k8s.cni.cncf.io
+----
+====
+
+.Apply MultiNetworkPolicy allow-same-vlan in rhacs-virt with annotation k8s.v1.cni.cncf.io/policy-for rhacs-virt/vlan-100, podSelector empty, policyTypes Ingress, and ingress from ipBlock 10.100.100.0/24, then print that annotation. Expect rhacs-virt/vlan-100. Leave rhel9-vm without a secondary interface
+[%collapsible]
+====
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc apply -f - <<'EOF'
 apiVersion: k8s.cni.cncf.io/v1beta1
 kind: MultiNetworkPolicy
 metadata:
   name: allow-same-vlan
-  namespace: rhel-webserver
+  namespace: rhacs-virt
   annotations:
-    k8s.v1.cni.cncf.io/policy-for: rhel-webserver/vlan-100
+    k8s.v1.cni.cncf.io/policy-for: rhacs-virt/vlan-100
 spec:
   podSelector: {}
   policyTypes:
     - Ingress
   ingress:
     - from:
-        - podSelector: {}
+        - ipBlock:
+            cidr: 10.100.100.0/24
+EOF
 ----
 
-Do not apply this example unless you created a matching NAD named `vlan-100` in that namespace. A policy for a NAD that does not exist does nothing useful; a policy for a NAD that *does* exist can cut the VM off.
-
-TIP: Re-run `oc get multi-networkpolicy -A` after a real apply.
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc get multi-networkpolicy -n rhacs-virt allow-same-vlan -o jsonpath='{.metadata.annotations.k8s\.v1\.cni\.cncf\.io/policy-for}{"\n"}'
+----
 ====
 
 == Debrief
 
-L2 first (VLAN), then spoof check on the port, then MultiNetworkPolicy inside the VLAN. Pod NetworkPolicy remains for the primary CNI (xref:101-05-network-policy-basics.adoc[101-05], xref:301-03-multi-tenant-zero-trust-network.adoc[301-03]).
+L2 first (`rhacs-virt/vlan-100`), then spoof check on the port (on by default for that OVN localnet), then `allow-same-vlan` inside the VLAN. Pod NetworkPolicy remains for the primary CNI (xref:101-05-network-policy-basics.adoc[101-05], xref:301-03-multi-tenant-zero-trust-network.adoc[301-03]).
 
 What breaks without this:
 
@@ -208,7 +301,7 @@ NOTE: Next is xref:virt-07-host-firmware-and-kernel.adoc[virt-07] -- firmware TX
 
 == Cleanup
 
-Progress only. NADs and policies you created stay for the rest of the pathway.
+Removes the example only: `allow-same-vlan`, `rhacs-virt/vlan-100`, and `useMultiNetworkPolicy`. `rhel9-vm` stays on the pod network. The original NetworkAttachmentDefinitions stay.
 
 :lab-cleanup-module: virt-06
 include::partial$lab-cleanup.adoc[]

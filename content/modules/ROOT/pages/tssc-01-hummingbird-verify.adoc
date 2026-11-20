@@ -1,22 +1,20 @@
 = 1.1 Verify Hummingbird
 :source-highlighter: rouge
 :toc:
-:toclevels: 2
+:toclevels: 1
 
 == Overview
 
-You verify a published Project Hummingbird / Red Hat Hardened Images runtime with `cosign` before anything is mirrored. You discover the workshop pin from cluster userinfo, complete the incomplete ConfigMap, and run `cosign verify` against that *published* digest. 
+In this lab, you will verify a published Project Hummingbird / Red Hat Hardened Images runtime with `cosign` before anything is mirrored. You will discover the workshop pin from cluster userinfo, complete the incomplete ConfigMap, and run `cosign verify` against that *published* digest. 
 
 == Why it matters
 
-Unsigned or unverified bases undermine every later signature, SBOM, and admission decision. Lightwell Network and Lightwell Clearinghouse Premier remediate application libraries. They are not this `FROM`. Hummingbird is the OS and runtime layer. A Premier GAV still needs a verified base.
+Unsigned or unverified bases undermine every later signature, SBOM, and admission decision. Hardened images provide a near-zero CVE image that is ready for production.
 
 == What does it solve
 
 * Runtime bases that were never signature-checked
 * Mutable tags such as `:latest` instead of a digest pin
-* Mixing the Hummingbird Red Hat key with in-cluster RHTAS
-* Treating Lightwell as a runtime substitute
 
 == Why verify before you mirror
 
@@ -34,48 +32,55 @@ A Hummingbird Python runtime uses the same verify story (`hi/python` or the pin 
 
 == Prerequisites
 
-* Bastion or Showroom terminal after xref:index.adoc#environment-setup[Environment setup] on the Welcome page (`setup/lab-environment.sh`). That script installs `cosign`, `oc-mirror`, and `ec` into `~/.local/bin` from Red Hat images. Do *not* curl `github.com` for CLIs.
+* Bastion or Showroom terminal after xref:index.adoc#environment-setup[Environment setup] on the Welcome page (`setup/lab-environment.sh`). That script installs `cosign`, `oc-mirror`, and `ec` into `~/.local/bin` from Red Hat images, and installs `mvn` from the Maven RPM. Do *not* curl `github.com` for CLIs.
 * ConfigMap `demo-userinfo-lightwell-repo` in namespace `lightwell-repo`.
-* If `command -v cosign` prints nothing, run `source ~/.bashrc` or re-run the Welcome setup block.
+* If `command -v cosign` prints nothing, re-run the Welcome xref:index.adoc#environment-setup[Environment setup] block.
 
-.Confirm the lab CLIs (expect a path and a version, not an empty prompt)
+. Confirm the lab CLIs (expect a path and a version, not an empty prompt)
++
 [source,bash,role=execute]
 ----
 command -v cosign
 command -v oc-mirror
 cosign version
-oc-mirror version
+oc-mirror version --v2
+----
++
+Expected output:
++
+----
+/home/lab-user/.local/bin/cosign
+/home/lab-user/.local/bin/oc-mirror
+GitVersion:    227f0ec0
+GitVersion:"4.20.0-
 ----
 
 == Discover the published pin
 
 Do *not* paste a digest from chat, a slide, or this page’s narrative. The live pin is userinfo.
 
-.Read the source pull spec (what you verify in 1.1 and pin in 1.2)
+. Read the source pull spec (what you verify in 1.1 and pin in 1.2)
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo \
   -o jsonpath='{.data.hummingbird_source_pullspec}{"\n"}{.data.dest_registry_host}{"\n"}'
 ----
-
-Keep the pull spec. The `@sha256:…` on that line is the *index* (it may list more than amd64). This cluster and this Check are amd64. Dual-arch hands-on is out of this lab.
-
-== Here's an example for you
-
-The following verifies a *different* image with a *non-Red Hat* key URL. If your Check uses this block unchanged, it fails.
-
-[source,bash]
++
+Expected output:
++
 ----
-# Worked example ONLY — ubi-minimal + a key that is not Red Hat Hardened Images.
-cosign verify \
-  --key https://example.invalid/not-redhat-hardened-images.pub \
-  --insecure-ignore-tlog \
-  registry.access.redhat.com/ubi9/ubi-minimal:latest
+registry.access.redhat.com/hi/openjdk:21-runtime@sha256:e7c41dc2cba28c49d551c491419e00b75c5aef6c13326cc08765d30e882630ba
+registry-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io
 ----
 
-== Your change: complete the verify ConfigMap
+Keep the pull spec. The `@sha256:…` on that line is the *index*.
 
-The Check grades ConfigMap `stub-01-hummingbird-verify` in namespace `lightwell-repo`, key `published-verify.sh`. That key is a short shell script. It ships with two placeholders. You copy it to your home directory, fill those two strings, then write the file back onto the same ConfigMap. A file that exists only on the bastion does not pass. Leave `REPLACE_ME` in the cluster object and the Check fails.
+== Your Task
+
+Complete the incomplete ConfigMap `stub-01-hummingbird-verify` in namespace `lightwell-repo`.
+
+Run `published-verify.sh`, it is a short shell script. It ships with two placeholders. You copy it to your home directory, fill those two strings, then write the file back onto the same ConfigMap.
 
 There are exactly two substitutions.
 
@@ -84,36 +89,35 @@ There are exactly two substitutions.
 |Placeholder in the seed |What you put there
 
 |`REPLACE_ME_HUMMINGBIRD_PULLSPEC`
-|The `hummingbird_source_pullspec` line you printed under *Discover the published pin* (the `hi/openjdk` digest, not `ubi-minimal`)
+|The `hummingbird_source_pullspec` line you printed under *Discover the published pin*.
 
 |`REPLACE_ME_COSIGN_KEY`
 |`https://security.access.redhat.com/data/63405576.txt` (Red Hat Hardened Images public key, from the docs link below)
 |===
 
-Do not paste the ubi-minimal worked example. Do not use an in-cluster Fulcio or Rekor URL. This Check is Red Hat’s published key, not Track 5 RHTAS.
 
-.1. Copy the seed out of the ConfigMap
+. Copy the seed out of the ConfigMap
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo get configmap stub-01-hummingbird-verify \
   -o jsonpath='{.data.published-verify\.sh}' > ~/track-1-1-published-verify.sh
 cat ~/track-1-1-published-verify.sh
 ----
++
+The first copy still has both `REPLACE_ME_*` strings. After you write the script back, the same command prints the pull spec and the `63405576.txt` key.
 
-You should see both `REPLACE_ME_*` strings. The seed looks like this:
-
-[source,bash]
+Expected output:
++
 ----
 #!/usr/bin/env bash
 set -euo pipefail
-export HUMMINGBIRD_PUBLISHED='REPLACE_ME_HUMMINGBIRD_PULLSPEC'
-cosign verify \
-  --key REPLACE_ME_COSIGN_KEY \
-  --insecure-ignore-tlog \
-  "${HUMMINGBIRD_PUBLISHED}"
+export HUMMINGBIRD_PUBLISHED=
+cosign verify
 ----
 
-.2. Fill both placeholders from live userinfo (do not type a digest from this page)
+. Fill both placeholders from live userinfo (do not type a digest from this page)
++
 [source,bash,role=execute]
 ----
 PIN="$(oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo \
@@ -131,20 +135,42 @@ ENDSCRIPT
 chmod +x ~/track-1-1-published-verify.sh
 cat ~/track-1-1-published-verify.sh
 ----
++
+Expected output:
++
+----
+PIN=registry.access.redhat.com/hi/openjdk:21-runtime@sha256:e7c41dc2cba28c49d551c491419e00b75c5aef6c13326cc08765d30e882630ba
+#!/usr/bin/env bash
+set -euo pipefail
+export HUMMINGBIRD_PUBLISHED='registry.access.redhat.com/hi/openjdk:21-runtime@sha256:e7c41dc2cba28c49d551c491419e00b75c5aef6c13326cc08765d30e882630ba'
+cosign verify --key https://security.access.redhat.com/data/63405576.txt --insecure-ignore-tlog "${HUMMINGBIRD_PUBLISHED}"
+----
 
 The `PIN=` line must be a `registry.access.redhat.com/hi/openjdk` pull spec with `@sha256:`. The script body must show that pull spec and the `63405576.txt` key URL, with no `REPLACE_ME`.
 
-See link:{docs-hardened-images-url}[Verify the integrity of Red Hat Hardened Images^] for why that key URL is the documented non-RHEL verify pattern. That host is Red Hat key distribution, not `github.com`. If the fetch is blocked, stop and tell an instructor.
+See link:{docs-hardened-images-url}[Verify the integrity of Red Hat Hardened Images^] for why that key URL is the documented non-RHEL verify pattern. That host is Red Hat key distribution. 
 
-.3. Write the filled script back onto the ConfigMap
+If the fetch is blocked, stop and tell an instructor.
+
+. Write the filled script back onto the ConfigMap
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo create configmap stub-01-hummingbird-verify \
   --from-file=published-verify.sh=$HOME/track-1-1-published-verify.sh \
   --dry-run=client -o yaml | oc apply -f -
 ----
++
+Expected output:
++
+----
+configmap/stub-01-hummingbird-verify configured
+----
 
-.4. Confirm the *cluster* object is filled (this is what the Check reads)
+A second run prints `unchanged`.
+
+. Confirm the *cluster* object is filled (this is what the Check reads)
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo get configmap stub-01-hummingbird-verify \
@@ -154,47 +180,53 @@ oc -n lightwell-repo get configmap stub-01-hummingbird-verify \
   -o jsonpath='{.data.published-verify\.sh}' | grep -E 'REPLACE_ME' \
   && echo 'STILL HAS PLACEHOLDERS' || echo 'placeholders gone'
 ----
++
+Expected output:
++
+----
+#!/usr/bin/env bash
+set -euo pipefail
+export HUMMINGBIRD_PUBLISHED='registry.access.redhat.com/hi/openjdk:21-runtime@sha256:e7c41dc2cba28c49d551c491419e00b75c5aef6c13326cc08765d30e882630ba'
+cosign verify --key https://security.access.redhat.com/data/63405576.txt --insecure-ignore-tlog "${HUMMINGBIRD_PUBLISHED}"
+
+placeholders gone
+----
 
 == Check: published `cosign verify`
 
-.Run your snippet — expect a successful verify for the *published* `hi/openjdk` pin
+. Run the script in your home directory. Success is `cosign` printing the verified signature for the pull spec in that file.
++
 [source,bash,role=execute]
 ----
-~/track-1-1-published-verify.sh
+bash "$HOME/track-1-1-published-verify.sh"
+----
++
+`cosign` also prints a JSON array of signatures. The lines that show success are:
++
+Expected output:
++
+----
+Verification for registry.access.redhat.com/hi/openjdk@sha256:e7c41dc2cba28c49d551c491419e00b75c5aef6c13326cc08765d30e882630ba --
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - The signatures were verified against the specified public key
 ----
 
-:report-name: report-01-hummingbird-verify
-:report-key: consume_published
-:report-token: consume-published
-include::partial$validate-job-report.adoc[]
+The image name inside that pull spec is `hi/openjdk`. The command to run is the `bash` line above.
 
-:validate-job: validate-01-hummingbird-verify
-:validate-job-template: job-01.yaml
-include::partial$validate-job-rerun.adoc[]
-
-Honor system: later modules still open if you skip this. The Validate Job grades the ConfigMap (no `REPLACE_ME`, digest matches userinfo) — not a screenshot of this terminal.
-
-Do *not*:
-
-* Pre-mirror or start Job `oc-mirror-learner` (that is 1.2)
-* Change the application `Dockerfile` `FROM` (Track 3)
-* Treat in-cluster RHTAS issuer/subject as this Check (those sign *your* app in Track 5)
-
-== Callout: multi-arch
-
-The catalog index for this pin may list arm64 alongside amd64. This cluster and this Check are amd64. The pull spec you recorded is the index digest. You do not run a second architecture in the lab.
+Honor system: later modules still open if you skip this. Success here is `cosign` accepting the published pull spec stored in the script.
 
 == Official documentation
 
 * link:{docs-hardened-images-url}[Verify the integrity of Red Hat Hardened Images^]
-* link:{lightwell-product-url}[Lightwell^] (Network and Clearinghouse Premier; complementary to Hardened Images, not a replacement)
 
 == Key takeaways
 
-* TSSC starts with a signed published runtime. You consume Hummingbird. You do not rebuild the factory.
-* Verify the *published* digest before you mirror. 1.2 is a separate Check on the *internal* digest.
-* Lightwell Network / Clearinghouse Premier remediate libraries. They are not this `FROM`.
-* `cosign` and `oc-mirror` came from Welcome xref:index.adoc#environment-setup[Environment setup] (`~/.local/bin`). You did not download them from GitHub.
+* TSSC starts with a signed published container image.
+* Verify the *published* digest before you mirror.
+* Lightwell Network / Clearinghouse Premier remediated libraries.
+
+== Clean up
 
 :lab-cleanup-module: tssc-01
 include::partial$lab-cleanup.adoc[]

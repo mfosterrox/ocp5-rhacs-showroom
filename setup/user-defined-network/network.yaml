@@ -1,0 +1,65 @@
+# Primary user-defined networks for the security demo.
+# Applied by setup/lab-environment.sh. Does not label or select the shared
+# demo-apps namespaces (operations, backend, frontend, medical, payments).
+# The primary-user-defined-network label is only accepted when the namespace
+# is created.
+#
+# checkout-service joins checkout-web, checkout-api, and the rhel-webserver
+# virtual machine on 192.168.210.0/24.
+# ledger-service is a separate network on 192.168.211.0/24.
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: checkout-service
+spec:
+  namespaceSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: checkout-service
+  network:
+    topology: Layer2
+    layer2:
+      role: Primary
+      subnets:
+        - "192.168.210.0/24"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: checkout-web
+  labels:
+    app.kubernetes.io/part-of: checkout-service
+    app.kubernetes.io/name: checkout-web
+    k8s.ovn.org/primary-user-defined-network: ""
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: checkout-api
+  labels:
+    app.kubernetes.io/part-of: checkout-service
+    app.kubernetes.io/name: checkout-api
+    k8s.ovn.org/primary-user-defined-network: ""
+---
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: ledger-service
+spec:
+  namespaceSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: ledger-service
+  network:
+    topology: Layer2
+    layer2:
+      role: Primary
+      subnets:
+        - "192.168.211.0/24"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ledger
+  labels:
+    app.kubernetes.io/part-of: ledger-service
+    app.kubernetes.io/name: ledger
+    k8s.ovn.org/primary-user-defined-network: ""

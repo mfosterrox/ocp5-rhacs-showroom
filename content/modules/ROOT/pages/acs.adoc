@@ -2,7 +2,7 @@
 
 include::partial$_attributes.adoc[]
 
-:page-toclevels: 2
+:page-toclevels: 1
 
 == Feature Overview
 
@@ -35,7 +35,7 @@ Each of these features is covered in more detail in the following sections. Part
 | {acs_route}[ACS Central^]
 |===
 
-* In the OpenShift Console, open the OpenShift Lightspeed dialog (the icon at the bottom right of the interface). Ask Lightspeed to create a shortcut to the ACS console:
+* In the OpenShift Console, open the OpenShift Lightspeed dialog (the icon at the bottom right of the interface). Ask Lightspeed to create a shortcut to the ACS console. If the chat cannot answer, open ACS from the Showroom tab on the right.
 +
 [source,bash,role="copypaste"]
 ----
@@ -98,11 +98,11 @@ Output should look like this:
 [source,bash]
 ----
 oc get route -n rhacs-mcp
-NAME                                          READY   STATUS      RESTARTS   AGE
-acs-mcp-server-stackrox-mcp-b79597899-lz64s   1/1     Running     0          3h5m
-copy-central-ca-8jrsn                         0/1     Completed   0          178m
-NAME                          HOST/PORT                                                                    PATH   SERVICES                      PORT    TERMINATION          WILDCARD
-acs-mcp-server-stackrox-mcp   acs-mcp-server-stackrox-mcp-rhacs-mcp.apps.ocp.2bfz7.sandbox5240.opentlc.com          acs-mcp-server-stackrox-mcp   https   reencrypt/Redirect   None
+NAME                                            READY   STATUS      RESTARTS   AGE
+rhacs-mcp-server-stackrox-mcp-b79597899-lz64s   1/1     Running     0          3h5m
+copy-central-ca-8jrsn                           0/1     Completed   0          178m
+NAME                            HOST/PORT                                                                      PATH   SERVICES                        PORT    TERMINATION          WILDCARD
+rhacs-mcp-server-stackrox-mcp   rhacs-mcp-server-stackrox-mcp-rhacs-mcp.apps.ocp.2bfz7.sandbox5240.opentlc.com          rhacs-mcp-server-stackrox-mcp   https   reencrypt/Redirect   None
 ----
 
 Awesome! You're ready to start the exercises.
@@ -189,7 +189,7 @@ image::acs-vm-openshift-virtualmachines.png[OpenShift console VirtualMachines pa
 +
 On the `rhel9-vm` overview, use *Open web console* (or open the *Console* tab).
 +
-Log in with username `{vm_user}` and the VM password from the xref:index.adoc[Welcome] page.
+Log in with username `{vm_user}` and password `roadshow`.
 +
 Run the remaining guest commands in this procedure from the VM console, not from the Showroom terminal.
 
@@ -198,11 +198,10 @@ Run the remaining guest commands in this procedure from the VM console, not from
 [source,sh,role="copypaste"]
 ----
 command -v roxagent
-sudo systemctl is-active roxagent-serve.service
-sudo journalctl -u roxagent-serve.service --no-pager -n 20
+sudo grep 'index report containing' /var/log/roxagent.log
 ----
 +
-`command -v` should print `/usr/local/bin/roxagent`. `roxagent-serve` must be `active` (this is pull mode: the agent listens on VSOCK port 818 so Sensor can request inventory). The journal should show the serve unit starting and an initial package scan. A warning about RPM epoch matching is expected and can be safely ignored.
+`command -v` should print `/usr/local/bin/roxagent`. A log line that includes `index report containing` and a package count means the guest finished a scan. The agent listens on VSOCK port 818 so Sensor can pull that inventory. Cloud-init can take several minutes after the VMI is `Running` before the log line appears.
 
 . In ACS Central, open *Vulnerability Management > Results > Virtual Machines*.
 +
@@ -360,7 +359,14 @@ Confirm:
 +
 TIP: The GitOps source for these policies is in the lab GitOps repository under `rhacs-operator/instance/templates/fim-deployment-policy.yaml` and `fim-node-policy.yaml`.
 
-. Confirm the FAM trigger workload from *Before You Begin* is running:
+. Deploy the FAM target. This is the workload the next steps write to. The script creates the `acs-fam-demo` namespace, allows a privileged debug shell, and starts `fam-target`:
++
+[source,sh,subs="attributes",role=execute]
+----
+bash setup/acs/deploy-fam-target.sh
+----
++
+. Confirm the workload is running:
 +
 [source,sh,subs="attributes",role=execute]
 ----
@@ -510,6 +516,8 @@ You should see an `acs-mcp` entry pointing at the in-cluster ACS MCP service URL
 [.step-title]
 Query ACS through OpenShift Lightspeed
 
+The `oc` checks above confirm the MCP server even if the chat cannot reach the model. An external Claude or Cursor client later in this exercise stays optional.
+
 . Open the OpenShift console and launch *OpenShift Lightspeed* (chat icon).
 +
 If prompted to approve MCP tools, approve the ACS MCP tools so the agent can call them.
@@ -640,6 +648,13 @@ create a new project for me called rhacs-init-container-test
 
 The MCP server requires approval, so approve when it asks you.
 
+If Lightspeed does not create the project, create it from the terminal:
+
+[source,bash,role="execute"]
+----
+oc new-project rhacs-init-container-test
+----
+
 On the left hand navigation, choose 'Projects' and then rhacs-init-container-test. All of the examples will be executed in this project to allow you to observe the results simply in
 the ACS console.
 
@@ -694,12 +709,13 @@ In the terminal, run:
 cd ~/ea5-components
 ----
 
-We will now apply two additional policies specific to this namespace only; in the terminal, run:
+Argo CD already applies the two policies for this exercise in the `rhacs-operator` namespace. They are scoped to `rhacs-init-container-test`. Do not apply `fixable-important-cve.yaml` or `privileged-init-container.yaml` from `ea5-components`. Those copies still use namespace `acs` and scope `acs-init-container-test`, which do not match this cluster.
+
+Confirm the policies are present:
 
 [source,bash,role="execute"]
 ----
-oc create -f ~/ea5-components/fixable-important-cve.yaml
-oc create -f ~/ea5-components/privileged-init-container.yaml
+oc get securitypolicy -n rhacs-operator eap-init-test-fixable-important-cve eap-init-test-privileged-container
 ----
 
 While in the terminal, have a look at these two policy definitions. Specifically, for `privileged-init-container.yaml` note:
@@ -870,7 +886,7 @@ chmod +x ~/ea5-components/skip-init-container-evaluation.sh
 
 The script will list all eligible policies and prompt you for each one. Answer `yes` to add the skip filter, `no` to leave it unchanged, or `all` to update all remaining policies without further prompts.
 
-After running the script, navigate to the RHACS console and open *Platform Configuration > Policy Management*. Policies that were updated by the script will show a "Skips init" indicator next to them. Note that the declarative (CRD-managed) policies we applied earlier (`EAP-Init-Test: Privileged Container` and `EAP-Init-Test: Fixable Important+ CVE`) were explicitly skipped by the script — these must be managed separately by adding `skipContainerTypes: ["INIT"]` to the `evaluationFilter` in their CRD manifests.
+After running the script, navigate to the RHACS console and open *Platform Configuration > Policy Management*. Policies that were updated by the script will show a "Skips init" indicator next to them. The declarative policies Argo CD applies (`EAP-Init-Test: Privileged Container` and `EAP-Init-Test: Fixable Important+ CVE`) are skipped by the script. Change those in Git by adding `skipContainerTypes: ["INIT"]` to `evaluationFilter` on the SecurityPolicy manifests. A console edit is overwritten on the next sync.
 
 image::acs-skip-init-policy-management.png[Policy Management showing Skips init indicator on updated policies,link=_images/acs-skip-init-policy-management.png,window=ea-images]
 
@@ -881,3 +897,5 @@ image::acs-skip-init-policy-management.png[Policy Management showing Skips init 
 * File activity monitoring provides visibility into security-relevant file access patterns
 * The ACS MCP server enables AI agents to query secured clusters and CVE findings (deployments and nodes) programmatically
 * Init container scanning extends image and policy coverage to init containers
+
+This track is complete. Return to the xref:index.adoc[home page] to choose the next track.

@@ -1,5 +1,6 @@
 = Installation and RHACS Cloud Service
 :toc:
+:toclevels: 1
 :sectnums:
 :icons: font
 
@@ -68,7 +69,7 @@ IMPORTANT: You should be redirected to your ACS instance at a page that looks li
 
 == Uninstall the "On-Prem" RHACS Operator
 
-While you're waiting for the Central Services to spin up, head over to the OpenShift console to unstall the existing operator. 
+While you're waiting for the Central Services to spin up, head over to the OpenShift console to uninstall the existing operator. 
 
 *Procedure*
 
@@ -92,7 +93,7 @@ image::11-uninstall-02.png[link=self, window=blank, width=100%]
 
 image::11-uninstall-03.png[link=self, window=blank, width=100%]
 
-IMPORTANT: If successfull, you will have no access to the RHACS console at `{acs_route}`
+IMPORTANT: If successful, you will have no access to the RHACS console at `{acs_route}`
 
 image::11-uninstall-04.png[link=self, window=blank, width=100%]
 
@@ -205,7 +206,7 @@ image::11-cs-08.png[link=self, window=blank, width=100%]
 
 [start=8]
 . Use all of the defaults but change the cluster name to *new-cluster*
-. Add the *Central Endpoint* of your ACS Cloud Service. This can be foudn in the console.openshift or the URL at the top of the page.  
+. Add the *Central Endpoint* of your ACS Cloud Service. This can be found in the console.openshift or the URL at the top of the page.  
 . Click "Install"
 
 image::11-cs-09.png[link=self, window=blank, width=100%]
@@ -229,17 +230,18 @@ If we restart that pod, the attacker's toolkit is gone forever. I need a CRIU ch
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Switch to your payment gateway namespace
+.Switch to project payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
-include::partial$payment-gateway-namespace.adoc[]
+[source,sh,subs="attributes",role=execute]
+----
+oc project payment-gateway-{workshop_user_suffix}
+----
 ====
 
-.Step 2 — Trigger a CRIU checkpoint
+.Checkpoint container httpd in pod payment-gateway on the node from label app=payment-gateway, POST the kubelet proxy checkpoint API with the oc whoami token, save the tarball under /tmp, and list it
 [%collapsible]
 ====
-Trigger a container checkpoint via the kubelet API:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 NODE_NAME=$(oc get pods -l app=payment-gateway -o jsonpath='{.items[0].spec.nodeName}')
@@ -273,11 +275,9 @@ ls -lah "/tmp/$CHECKPOINT_FILE"
 image::fsi-security/criu-checkpoint.png[CRIU checkpoint archive,link=self, window=blank, width=100%]
 ====
 
-.Step 3 — Inspect the checkpoint with checkpointctl
+.Install checkpointctl from https://raw.githubusercontent.com/jmhbnz/checkpointctl/main/bin/checkpointctl to /tmp/checkpointctl, then run checkpointctl inspect --ps-tree-env on `/tmp/checkpoint-payment-gateway_payment-gateway*`. Expect exfil.sh
 [%collapsible]
 ====
-Install and run `checkpointctl` to inspect the process tree:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 curl --silent --fail --location \
@@ -289,8 +289,6 @@ export PATH=/tmp:$PATH
 
 checkpointctl inspect --ps-tree-env /tmp/checkpoint-payment-gateway_payment-gateway*
 ----
-
-TIP: Look for `exfil.sh` in the process tree—the smoking gun from the simulated intrusion.
 ====
 
 === What you learned

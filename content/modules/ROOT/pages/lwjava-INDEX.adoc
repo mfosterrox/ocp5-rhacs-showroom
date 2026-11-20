@@ -1,0 +1,75 @@
+= Lightwell Java workshop
+:toc:
+:toclevels: 1
+
+This track is its own path. It does not change the Checks in the seven-track xref:tssc-INDEX.adoc[Secure Software Supply Chain] lab.
+
+Argo CD has already built and deployed *Help, I'm Vulnerable!*, a Spring Boot service with known vulnerable libraries. The Application `lightwell-java` is Synced. Red Hat Advanced Cluster Security (RHACS) can see that running image. A critical finding is already on it: `CVE-2022-40152` in Woodstox `6.0.3`.
+
+You repeat the supply-chain steps for a patched release. This time the build uses Lightwell rebuilds, which keep the same upstream version line and add a `.rhlw` suffix. You do not take a Spring Boot major upgrade.
+
+== What is already done
+
+GitOps owns the vulnerable release. The setup script waits for it. It does not deploy it a second time.
+
+* Source pin `{java-demo-revision}` from {java-demo-repo}
+* Maven settings in that source already prefer the public Lightwell demo repositories
+* BuildConfig `help-im-vulnerable` has produced ImageStreamTag `help-im-vulnerable:vulnerable`
+* Deployment, Service, and Route `help-im-vulnerable` are synced in namespace `help-im-vulnerable`
+* ConfigMap `help-im-vulnerable-digest` stores the original image digest
+* The image contains a CycloneDX SBOM at `/deployments/maven-sbom.json`
+
+The vulnerable coordinates are still the ones in that image: Woodstox `6.0.3`, Spring Framework `5.3.18`, `org.json:json` `20220320`, and json-path `2.8.0`.
+
+== What you will do
+
+[cols="1,4,1",options="header"]
+|===
+|Module |What you do |Time
+
+|xref:lwjava-01-incident.adoc[1]
+|Confirm the Argo CD release and the critical finding
+|10 min
+
+|xref:lwjava-02-proxy.adoc[2]
+|Read the Lightwell repository order already in the source
+|10 min
+
+|xref:lwjava-03-pin.adoc[3]
+|Pin the Lightwell rebuilds, including the Woodstox fix
+|15 min
+
+|xref:lwjava-04-source.adoc[4]
+|Keep that change in the source the next build uses
+|10 min
+
+|xref:lwjava-05-bind.adoc[5]
+|Bind those versions so the build cannot float back
+|10 min
+
+|xref:lwjava-06-renovate.adoc[6]
+|Match the change Renovate would open
+|10 min
+
+|xref:lwjava-07-build.adoc[7]
+|Rebuild the image and read the SBOM
+|20 min
+
+|xref:lwjava-08-sign.adoc[8]
+|Sign the new digest
+|15 min
+
+|xref:lwjava-09-gitops.adoc[9]
+|Let the existing Application roll the Deployment
+|15 min
+
+|xref:lwjava-10-confirm.adoc[10]
+|Confirm the route, the SBOM, and RHACS
+|15 min
+
+| |
+|*Total*
+|*2 hr*
+|===
+
+Continue with xref:lwjava-01-incident.adoc[1. See the vulnerable release].

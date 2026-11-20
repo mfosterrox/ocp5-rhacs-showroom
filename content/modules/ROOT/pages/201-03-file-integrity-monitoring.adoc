@@ -7,6 +7,7 @@
 :cis-summary: "Implement file integrity monitoring and node-level security hardening using the File Integrity Operator."
 :mitre-summary: "Detects unauthorized file system changes and implements node-level security controls."
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~30 minutes
@@ -79,13 +80,14 @@ Hands-on ACS runtime enforcement is xref:acs-06-network-and-runtime.adoc[acs-06]
 == Your Mission
 Turn on File Integrity Operator for worker nodes so a silent binary or config change on the host is a report, not a surprise during incident response. Treat that as the node layer only—RHACS still has to watch file activity in the workload.
 
-Click each step only if you need a hint.
+Click each step for the full solution.
 
-.Install File Integrity Operator
+:lab-run-module: 201-03
+include::partial$lab-run.adoc[]
+
+.Apply Namespace openshift-file-integrity with openshift.io/cluster-monitoring=true and pod-security.kubernetes.io enforce, audit, and warn privileged, OperatorGroup file-integrity-operator, and Subscription file-integrity-operator on channel stable from redhat-operators with installPlanApproval Automatic
 [%collapsible]
 ====
-The operator is cluster-scoped in effect (AIDE on nodes) but OLM-installs into `openshift-file-integrity`. The namespace needs privileged PSA so the operator and AIDE pods can run. This is the documented CLI install — no OperatorHub click-path.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<'EOF'
@@ -121,15 +123,11 @@ spec:
   sourceNamespace: openshift-marketplace
 EOF
 ----
-
-TIP: Namespace, OperatorGroup, and Subscription created (or already configured). Image pull can take a few minutes.
 ====
 
-.Wait until File Integrity Operator is Succeeded
+.Wait until the CSV phase in openshift-file-integrity is Succeeded, then show the CSV and pods. Expect PHASE Succeeded and the operator pod Running
 [%collapsible]
 ====
-Do not create a `FileIntegrity` object until the CSV is `Succeeded`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 echo "Waiting for File Integrity Operator CSV..."
@@ -142,17 +140,11 @@ done
 oc get csv -n openshift-file-integrity
 oc get pods -n openshift-file-integrity
 ----
-
-TIP: CSV `PHASE` is `Succeeded` and the operator pod is `Running`. If the CSV never appears, check `oc get packagemanifest file-integrity-operator -n openshift-marketplace`.
 ====
 
-.Install File Integrity console plugin
+.If packagemanifest file-integrity-console-plugin exists, apply Namespace file-integrity-console-plugin, OperatorGroup file-integrity-console-plugin, and Subscription file-integrity-console-plugin on channel $PLUGIN_CHANNEL from community-operators with installPlanApproval Automatic
 [%collapsible]
 ====
-Optional UI: **Compute → File Integrity** in the admin console. This is a separate community operator in its own namespace. It reads File Integrity CRs with *your* token; it does not need to live next to the operator. Skip this step if `community-operators` is not on the cluster.
-
-The install form defaults the plugin to *Disabled*. The next step enables it with `oc`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 PLUGIN_CHANNEL=$(oc get packagemanifest file-integrity-console-plugin -n openshift-marketplace -o jsonpath='{.status.defaultChannel}' 2>/dev/null || true)
@@ -189,15 +181,11 @@ spec:
 EOF
 fi
 ----
-
-TIP: `subscription.operators.coreos.com/file-integrity-console-plugin created` (or configured). Channel comes from the packagemanifest so it matches this OpenShift version.
 ====
 
-.Wait for the plugin and enable it on the console
+.Wait until the CSV in file-integrity-console-plugin is Succeeded, then add plugin file-integrity-console-plugin to consoles.operator.openshift.io cluster and show spec.plugins. Expect file-integrity-console-plugin in spec.plugins
 [%collapsible]
 ====
-Community plugins are not trusted by default. Enabling adds `file-integrity-console-plugin` to the cluster Console CR. The console restarts once; refresh the browser afterward.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 echo "Waiting for console plugin CSV..."
@@ -225,41 +213,29 @@ fi
 oc get consoles.operator.openshift.io cluster -o jsonpath='{.spec.plugins}{"\n"}'
 oc get consoleplugin "$PLUGIN" 2>/dev/null || echo "ConsolePlugin CR appears after the plugin pod starts."
 ----
-
-TIP: `spec.plugins` includes `file-integrity-console-plugin`. OpenShift Console → Compute → File Integrity after a browser refresh.
 ====
 
-.Confirm operator pods in openshift-file-integrity
+.Get pods in openshift-file-integrity. Expect the operator pod Running
 [%collapsible]
 ====
-AIDE daemonset pods appear after you create the `FileIntegrity` object in the next steps. Right now you should see the operator itself.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get pods -n openshift-file-integrity
 ----
-
-TIP: Operator pod(s) `Running`. `No resources found` means the Subscription has not reconciled yet — re-run the wait step.
 ====
 
-.Get FileIntegrity objects cluster-wide
+.Get FileIntegrity objects in all namespaces
 [%collapsible]
 ====
-See whether a scan object already exists before you create one.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get fileintegrity -A
 ----
-
-TIP: An empty list is fine. You will create `worker-file-integrity` next.
 ====
 
-.Apply FileIntegrity worker-file-integrity
+.Apply FileIntegrity worker-file-integrity in openshift-file-integrity with nodeSelector node-role.kubernetes.io/worker="", config my-file-integrity-config in openshift-file-integrity, and debug false
 [%collapsible]
 ====
-Select worker nodes. Leave debug off unless you are troubleshooting the operator itself.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<'EOF'
@@ -277,47 +253,33 @@ spec:
   debug: false
 EOF
 ----
-
-TIP: `fileintegrity.fileintegrity.openshift.io/worker-file-integrity created` (or configured).
 ====
 
-.Get FileIntegrity in openshift-file-integrity
+.Get FileIntegrity in openshift-file-integrity. Expect worker-file-integrity
 [%collapsible]
 ====
-Confirm the object is Accepted / Active before you hunt for reports.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get fileintegrity -n openshift-file-integrity
 ----
-
-TIP: `worker-file-integrity` is listed. Status may take a minute to settle.
 ====
 
-.Get FileIntegrityReports
+.Get FileIntegrityReports in openshift-file-integrity. Expect one report per scanned node
 [%collapsible]
 ====
-Reports appear after AIDE has a baseline. Wait if the list is empty.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get fileintegrityreports -n openshift-file-integrity
 ----
-
-TIP: One report per scanned node is typical.
 ====
 
-.Read FileIntegrityReport results
+.Show FileIntegrityReport results in openshift-file-integrity. Expect an empty change list on a clean baseline
 [%collapsible]
 ====
-Look at the `results` stanza for added, changed, or removed files.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get fileintegrityreports -n openshift-file-integrity -o yaml | grep -A 10 "results"
 ----
-
-TIP: An empty change list means the baseline is clean. A hit is a host-file change to investigate.
 ====
 
 == Debrief

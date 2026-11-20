@@ -3,6 +3,7 @@
 :skills: Intel TXT, Nested Virtualization, schedstats, CPU Mitigations
 :labid: LAB-VIRT-07
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~25 minutes
@@ -31,22 +32,21 @@ Pick a worker, `oc debug` it, and score four controls. Leave MachineConfig YAML 
 * Permission to `oc debug node`
 * Intel vs AMD: use `kvm_intel` or `kvm_amd` as appropriate
 
-Click each step only if you need a hint.
+Click each step for the full solution.
 
-.Pick a worker node
+:lab-run-module: virt-07
+include::partial$lab-run.adoc[]
+
+.List nodes with label node-role.kubernetes.io/worker
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get nodes -l node-role.kubernetes.io/worker -o wide
 ----
-
-TIP: Copy one `NAME`. The next steps use the first worker if you do not override `NODE`.
 ====
 
-=== Control: Disable Intel Trusted Execution Technology (TXT)
-
-**Level:** 1
+=== Control: Disable Intel Trusted Execution Technology (TXT) (Level 1 Control)
 
 Intel TXT is a CPU/firmware feature. Red Hat OpenShift and OpenShift Virtualization do not use it. The guide says disable it.
 
@@ -56,32 +56,24 @@ Intel TXT is a CPU/firmware feature. Red Hat OpenShift and OpenShift Virtualizat
 
 *Default:* Firmware-dependent. You must read BIOS.
 
-.Audit TXT
+.On the first worker node, debug the host and run fwupdmgr get-bios-settings for txt or TxT. Expect TxT Disabled, or fwupdmgr not available. On this AMD roadshow worker, record Intel TXT as not applicable
 [%collapsible]
 ====
-`fwupdmgr` is not always present on RHCOS. Try it, then treat a missing tool as "check BIOS in the hardware console."
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}')
 echo "NODE=$NODE"
 oc debug node/"$NODE" --quiet -- chroot /host sh -c 'command -v fwupdmgr >/dev/null && fwupdmgr get-bios-settings | grep -i -A2 -E "txt|TxT" || echo "fwupdmgr not available; confirm TxT Disabled in the server BIOS"'
 ----
-
-TIP: Look for TxT / TXT *Disabled*. If the tool is missing, open the vendor iLO/iDRAC/BMC and record the setting there.
 ====
 
-.Remediation
+.Disable TXT in firmware on every virt worker, then reboot from the vendor hardware workflow. This is not a MachineConfig. Do not reboot this lab from the BIOS. After the change window, re-run the debug command or confirm TxT Disabled in the BMC
 [%collapsible]
 ====
 Disable TXT in firmware on every virt worker, then reboot from the hardware workflow your vendor documents. This is not a MachineConfig. Do not reboot this lab from the BIOS screens.
-
-TIP: After a real change window, re-run the debug command or confirm in BMC.
 ====
 
-=== Control: Disable nested virtualization
-
-**Level:** 1
+=== Control: Disable nested virtualization (Level 1 Control)
 
 Nested virtualization lets a guest use hardware VMX/SVM to run another hypervisor. It is required for WSL2 in a Windows guest and for nested KVM labs. It is extra attack surface otherwise.
 
@@ -89,13 +81,11 @@ Nested virtualization lets a guest use hardware VMX/SVM to run another hyperviso
 
 *Cons / impact:* Windows guests cannot use WSL2. Nested KVM inside the VM fails. If that is a required product feature, this control is an exception, not a silent disable.
 
-*Default:* Red Hat OpenShift does not enable nested virtualization.
+*Default:* OpenShift does not set a nested-virt kernel argument. On current RHCOS, AMD still reports `1` because that is the kernel default. Intel often reports `0` until an argument turns it on.
 
-.Audit nested
+.On the first worker node, read /sys/module/kvm_intel/parameters/nested or /sys/module/kvm_amd/parameters/nested. Expect 0 or N. kvm_amd nested=1 on this roadshow is the demo exception. Do not set kvm_amd.nested=0 in this cluster
 [%collapsible]
 ====
-`0` or `N` means disabled; `1` or `Y` means enabled. Intel vs AMD module name differs.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}')
@@ -109,11 +99,9 @@ oc debug node/"$NODE" --quiet -- chroot /host sh -c '
   fi
 '
 ----
-
-TIP: Disabled (`0` or `N`) is the pass unless you have a written WSL2/nested-KVM exception.
 ====
 
-.Remediation
+.Add kernel argument kvm_intel.nested=0 or kvm_amd.nested=0 on the worker MachineConfigPool and reboot. Do not apply this in the roadshow cluster. Expect /sys/module/kvm_*/parameters/nested to show 0 or N
 [%collapsible]
 ====
 Add the kernel argument on the worker MachineConfigPool and reboot. Do **not** apply this in the roadshow cluster.
@@ -122,13 +110,9 @@ Intel: `kvm_intel.nested=0`
 AMD: `kvm_amd.nested=0`
 
 See link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/machine_configuration/index[Customizing nodes / Machine Config^].
-
-TIP: After a real MCP update, re-run the `cat` on `/sys/module/kvm_*/parameters/nested`.
 ====
 
-=== Control: Enable vCPU metrics (schedstats)
-
-**Level:** 1
+=== Control: Enable vCPU metrics (schedstats) (Level 1 Control)
 
 OpenShift Virtualization vCPU Prometheus metrics need the kernel argument `schedstats=enable`.
 
@@ -138,7 +122,7 @@ OpenShift Virtualization vCPU Prometheus metrics need the kernel argument `sched
 
 *Default:* OpenShift typically enables `schedstats`. The cmdline should contain `schedstats=enable`.
 
-.Audit schedstats
+.On the first worker node, cat /proc/cmdline. Expect schedstats=enable
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -146,21 +130,15 @@ OpenShift Virtualization vCPU Prometheus metrics need the kernel argument `sched
 NODE=$(oc get nodes -l node-role.kubernetes.io/worker -o jsonpath='{.items[0].metadata.name}')
 oc debug node/"$NODE" --quiet -- chroot /host sh -c 'cat /proc/cmdline'
 ----
-
-TIP: The line should include `schedstats=enable`. If it does not, vCPU metrics from CNV will not populate as documented.
 ====
 
-.Remediation
+.Add kernel argument schedstats=enable via MachineConfig on virt workers and reboot. Do not apply MachineConfig in this lab. Expect grep schedstats=enable /proc/cmdline to match
 [%collapsible]
 ====
 Add `schedstats=enable` via MachineConfig on virt workers and reboot. Same docs as nested virt: link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/machine_configuration/index[Customizing nodes^]. Do not apply MCP in this lab.
-
-TIP: After reboot, `grep schedstats=enable /proc/cmdline` on the node should match.
 ====
 
-=== Control: Make sure all CPU vulnerabilities are mitigated
-
-**Level:** 1
+=== Control: Make sure all CPU vulnerabilities are mitigated (Level 1 Control)
 
 The kernel publishes per-issue state under `/sys/devices/system/cpu/vulnerabilities`. Values are `Not affected`, `Mitigation: ...`, or `Vulnerable`.
 
@@ -170,7 +148,7 @@ The kernel publishes per-issue state under `/sys/devices/system/cpu/vulnerabilit
 
 *Default:* The files exist when the running kernel supports them. Empty directory is unexpected on current RHCOS.
 
-.Audit CPU vulnerability files
+.On the first worker node, list and read /sys/devices/system/cpu/vulnerabilities. Expect Not affected or Mitigation:. Vulnerable without a documented exception is a finding
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -184,16 +162,12 @@ oc debug node/"$NODE" --quiet -- chroot /host sh -c '
   done
 '
 ----
-
-TIP: Read each line. `Vulnerable` without a documented exception is a finding. `Not affected` and `Mitigation:` are passes.
 ====
 
-.Remediation
+.Add the kernel arguments your hardware docs require via MachineConfigPool, then reboot. Do not apply that MachineConfig here. Expect Vulnerable to be gone or explicitly accepted
 [%collapsible]
 ====
 Add the kernel arguments your hardware/kernel docs require (for example to force mitigations on), via MachineConfigPool, then reboot. See link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/machine_configuration/index[Customizing nodes^]. Do not apply that MCP here.
-
-TIP: Re-read the vulnerability files after the reboot. `Vulnerable` should be gone or explicitly accepted.
 ====
 
 == Debrief
@@ -206,11 +180,11 @@ What breaks without this:
 * No vCPU metrics when a guest misbehaves
 * Hypervisor nodes that still advertise `Vulnerable` for known CPU bugs
 
-The pathway is complete. Cluster objects were left in place on purpose so you can re-audit later.
+This track is complete. Cluster objects were left in place on purpose so you can re-audit later. Return to the xref:index.adoc[home page] to choose another track.
 
 == Cleanup
 
-Records progress only. No MachineConfig, no node reboot, no delete of `rhel-webserver` or HCO.
+Records progress only. No MachineConfig, no node reboot, no delete of `rhel9-vm` or HCO.
 
 :lab-cleanup-module: virt-07
 include::partial$lab-cleanup.adoc[]

@@ -1,0 +1,74 @@
+= 3. Forensic Investigation
+:toc:
+:toclevels: 1
+:icons: font
+
+xref:index.adoc[← Security response overview]
+
+== Overview
+
+Egress from `payment-gateway` is quiet. Morgan still cannot see what was running inside the container. A restart would discard that state. Sarah takes a CRIU checkpoint: a point-in-time copy of the container's processes, memory, and open files, while the pod keeps running.
+
+image::fsi-security/sarah-infosec.png[Reviewing the checkpoint,link=self, window=blank, width=100%]
+
+Container checkpointing is generally available in OpenShift 4.17 and later. `checkpointctl` reads the archive afterward. Background: link:https://criu.org[CRIU^] and the link:https://access.redhat.com/solutions/7008477[OpenShift checkpoint solution^].
+
+== Your mission
+
+Checkpoint the `httpd` container on `payment-gateway` and inspect the process tree.
+
+.Checkpoint the httpd container of the app=payment-gateway pod in payment-gateway-{workshop_user_suffix} through the node proxy checkpoint API, then copy the tarball to /tmp/$CHECKPOINT_FILE
+[%collapsible]
+====
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+NODE_NAME=$(oc get pods -l app=payment-gateway -n payment-gateway-{workshop_user_suffix} -o jsonpath='{.items[0].spec.nodeName}')
+POD_NAME=$(oc get pods -l app=payment-gateway -n payment-gateway-{workshop_user_suffix} -o jsonpath='{.items[0].metadata.name}')
+CURRENT_NS=payment-gateway-{workshop_user_suffix}
+
+echo "==> Triggering CRIU checkpoint on node: $NODE_NAME pod: $POD_NAME"
+
+API_RESPONSE=$(curl --silent --insecure \
+  --header "Authorization: Bearer $(oc whoami --show-token)" \
+  --request POST "$(oc whoami --show-server)/api/v1/nodes/${NODE_NAME}/proxy/checkpoint/${CURRENT_NS}/${POD_NAME}/httpd")
+
+TARBALL_PATH=$(echo "$API_RESPONSE" | jq -r '.items[0] // empty')
+
+if [ -z "$TARBALL_PATH" ] || [ "$TARBALL_PATH" = "null" ]; then
+  echo "[!] Checkpoint failed. API response was:"
+  echo "$API_RESPONSE"
+  exit 1
+fi
+
+CHECKPOINT_FILE=${TARBALL_PATH##*/}
+echo "==> Checkpoint created: $CHECKPOINT_FILE"
+
+oc debug node/"$NODE_NAME" --to-namespace="$CURRENT_NS" -- \
+  chroot /host /bin/sh -c "cat $TARBALL_PATH" > "/tmp/$CHECKPOINT_FILE"
+
+ls -lah "/tmp/$CHECKPOINT_FILE"
+----
+
+image::fsi-security/criu-checkpoint.png[CRIU checkpoint archive,link=self, window=blank, width=100%]
+====
+
+.Install checkpointctl from https://raw.githubusercontent.com/jmhbnz/checkpointctl/main/bin/checkpointctl to /tmp/checkpointctl, then run /tmp/checkpointctl inspect --ps-tree-env on /tmp/checkpoint-payment-gateway_payment-gateway*. Expect httpd and exfil.sh
+[%collapsible]
+====
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+curl --silent --fail --location \
+  'https://raw.githubusercontent.com/jmhbnz/checkpointctl/main/bin/checkpointctl' \
+  --output /tmp/checkpointctl
+chmod +x /tmp/checkpointctl
+
+/tmp/checkpointctl inspect --ps-tree-env /tmp/checkpoint-payment-gateway_payment-gateway*
+----
+====
+
+== What you learned
+
+* A forensic checkpoint keeps volatile state without deleting the pod.
+* The process tree is enough to name what was running. Memory analysis beyond that belongs with the infosec tools Morgan's team already uses.
+
+Next: xref:sr-04-harden-workload.adoc[4. Harden the workload].

@@ -3,6 +3,7 @@
 :skills: Audit Logs, Correlation, Monitoring, Threat Detection, Splunk, ClusterLogForwarder
 :labid: LAB-201-06
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~30 minutes
@@ -29,31 +30,28 @@ Deploy Splunk as the lab SIEM, forward kube-apiserver audit to it, generate a su
 * `jq` and `curl` on the bastion
 * Storage for Splunk PVCs (about 20Gi + 5Gi)
 
-Click each step only if you need a hint.
+Click each step for the full solution.
+
+:lab-run-module: 201-06
+include::partial$lab-run.adoc[]
 
 === Part A: SIEM and audit forwarding
 
 IMPORTANT: Splunk’s first boot often takes **10–25 minutes**. Start `install.sh`, then keep reading Why it matters / Detection Logic while it rolls.
 
-.Deploy Splunk and forward OpenShift audit
+.Run ~/ocp5-rhacs-showroom/setup/splunk-lab/install.sh with SPLUNK_RUN_CLEAN_FIRST=false. Expect the Splunk Web URL and the admin password when deployment/splunk in namespace splunk is up
 [%collapsible]
 ====
-Scripts live in this roadshow repo (vendored from https://github.com/mfosterrox/rhacs-demo/tree/main/splunk-setup[rhacs-demo/splunk-setup], plus ClusterLogForwarder wiring). `install.sh` deploys Splunk, installs the RHACS add-on when `ROX_API_TOKEN` is set, then creates an HEC token and a `ClusterLogForwarder` that ships `audit` to Splunk.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-cd ~/openshift-security-roadshow/setup/splunk-lab
+cd ~/ocp5-rhacs-showroom/setup/splunk-lab
 SPLUNK_RUN_CLEAN_FIRST=false ./install.sh
 ----
-
-TIP: End of the run prints Splunk Web URL, `admin` password, HEC endpoint, and example searches. First boot waits on `deployment/splunk` in namespace `splunk`.
 ====
 
-.Confirm Splunk Web and the collector
+.Print Route splunk-web in namespace splunk, decode the password from Secret splunk-auth, then show ClusterLogForwarders and pods in openshift-logging. Expect to sign in as admin
 [%collapsible]
 ====
-Open Splunk Web from the route. Collector pods appear in `openshift-logging` after the Cluster Logging Operator reconciles the forwarder.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get route splunk-web -n splunk -o jsonpath='https://{.spec.host}{"\n"}'
@@ -62,8 +60,6 @@ oc -n splunk get secret splunk-auth -o jsonpath='{.data.password}' | base64 -d; 
 oc get clusterlogforwarder -A 2>/dev/null || true
 oc get pods -n openshift-logging 2>/dev/null || true
 ----
-
-TIP: Sign in as `admin`. Home may already be the **RHACS Security Operations Dashboard**. You will hunt kube-apiserver audit in **Search & Reporting**, not only that dashboard. If there is no ClusterLogForwarder yet, Part C still works via `push-recent-audit.sh`.
 ====
 
 === Part B: Generate a suspicious exec
@@ -71,124 +67,88 @@ TIP: Sign in as `admin`. Home may already be the **RHACS Security Operations Das
 .Create project 201-06-a-correlation
 [%collapsible]
 ====
-Stay in this project for the sleeper pod.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 201-06-a-correlation
 ----
-
-TIP: `Now using project "201-06-a-correlation"`.
 ====
 
-.Run pod sleeper
+.Run pod sleeper with image registry.access.redhat.com/ubi9/ubi and command sleep 600
 [%collapsible]
 ====
-A long-running pod gives you a stable exec target.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc run sleeper --image=registry.access.redhat.com/ubi9/ubi -- sleep 600
 ----
-
-TIP: `pod/sleeper created`. Wait until it is Running before you exec.
 ====
 
-.Exec id and uname on sleeper
+.Exec id and uname -a on pod sleeper
 [%collapsible]
 ====
-This is the suspicious action. Run it so audit records `connect` / `exec`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec sleeper -- sh -c 'id; uname -a'
 ----
-
-TIP: You should see a uid and kernel string.
 ====
 
-.Exec on sleeper a second time
+.Exec id and uname -a on pod sleeper a second time
 [%collapsible]
 ====
-Repeated exec looks like probing, not a one-off debug session.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec sleeper -- sh -c 'id; uname -a'
 ----
-
-TIP: Same output. Two audit events should exist.
 ====
 
 === Part C: Hunt in Splunk
 
-.Seed Splunk with recent kube-apiserver audit
+.Run ~/ocp5-rhacs-showroom/setup/splunk-lab/push-recent-audit.sh
 [%collapsible]
 ====
-ClusterLogForwarder collectors can take several minutes. This copies the last lines of each master’s `kube-apiserver/audit.log` into HEC so Search is not empty for the demo. It uses `oc adm node-logs` (same path as 101-09), not a file on the bastion.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-cd ~/openshift-security-roadshow/setup/splunk-lab
+cd ~/ocp5-rhacs-showroom/setup/splunk-lab
 ./push-recent-audit.sh
 ----
-
-TIP: `Posted from <master>`. Re-run after more execs if the first window was too early.
 ====
 
-.Search Splunk for sleeper exec
+.In Splunk Search and Reporting, time range Last 1 hour, search index=main for sleeper and exec or connect, then search index=main sourcetype=kube:apiserver:audit for sleeper. Expect user.username, objectRef.name sleeper, objectRef.subresource exec, and verb create or connect
 [%collapsible]
 ====
-Splunk Web → **Search & Reporting**. Set the time picker to **Last 1 hour**. Run:
-
 [source]
 ----
 index=main (sleeper AND (exec OR connect))
 ----
 
-Also try the sourcetype the HEC token sets:
-
 [source]
 ----
 index=main sourcetype="kube:apiserver:audit" sleeper
 ----
-
-TIP: Expand an event and read `user.username` (or `user.groups`), `objectRef.namespace`, `objectRef.name` (`sleeper`), `objectRef.subresource` (`exec`), `verb` (`create` / `connect`), and `sourceIPs`. That is the API half of the story.
 ====
 
-.Correlate with RHACS in the same SIEM (optional)
+.Optionally search Splunk `index=* sourcetype="stackrox-*" sleeper`
 [%collapsible]
 ====
-If `install.sh` created the RHACS Splunk notifier (`ROX_API_TOKEN` was set), Central also writes alerts into HEC.
-
 [source]
 ----
 index=* sourcetype="stackrox-*" sleeper
 ----
-
-TIP: API audit names the Kubernetes user and verb. RHACS names the process inside the container. Same pod, two sensors. Empty `stackrox-*` means the notifier or add-on inputs have not run yet—kube-apiserver hits are still enough for this lab.
 ====
 
 === Part D: Join runtime
 
-.Read sleeper logs from the last two minutes
+.Read logs for pod sleeper in 201-06-a-correlation since 2m
 [%collapsible]
 ====
-Join the audit timestamp to what the container printed.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc logs sleeper -n 201-06-a-correlation --since=2m
 ----
-
-TIP: The sleep image may log little; empty logs still prove you checked the runtime side. In RHACS, look for a matching process-exec finding.
 ====
 
-.Confirm the node file still matches Splunk
+.Set MASTER to the first node labeled node-role.kubernetes.io/control-plane, or node-role.kubernetes.io/master, then show the last 3 kube-apiserver/audit.log lines matching sleeper and exec. Expect sleeper and exec
 [%collapsible]
 ====
-Spot-check that the SIEM did not invent the event. Use `oc adm node-logs`, not `grep` on the bastion—the audit file is on the control plane.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 MASTER=$(oc get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
@@ -197,8 +157,6 @@ if [ -z "$MASTER" ]; then
 fi
 oc adm node-logs "$MASTER" --path=kube-apiserver/audit.log | grep sleeper | grep exec | tail -3
 ----
-
-TIP: JSON lines with `sleeper` and `exec`. Same user and pod you saw in Splunk.
 ====
 
 == Detection Logic Draft

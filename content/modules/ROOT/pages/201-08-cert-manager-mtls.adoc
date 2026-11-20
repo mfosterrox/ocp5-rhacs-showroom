@@ -3,6 +3,7 @@
 :cis-summary: "Implement automated certificate management and mutual TLS (mTLS) using cert-manager Operator."
 :mitre-summary: "Prevents man-in-the-middle attacks and ensures secure service-to-service communication through automated certificate lifecycle management."
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~30 minutes
@@ -31,56 +32,45 @@ Issue a service certificate with cert-manager so east-west traffic can use ident
 
 Do **not** edit or delete ClusterIssuers named `selfsigned` or `acme-*`. Do not change certificates in `openshift-ingress`, `openshift-config`, or `stackrox`.
 
-Click each step only if you need a hint.
+Click each step for the full solution.
+
+:lab-run-module: 201-08
+include::partial$lab-run.adoc[]
 
 === Part A: In-cluster issuance (self-signed)
 
 This is the intro: cert-manager writes a Secret. The signer is local. Clients need `--cacert` or `-k`. That is enough for a lab mTLS mount; it is not enough for “the world trusts this name.”
 
-.Get pods in openshift-cert-manager
+.Get pods in namespace openshift-cert-manager. Expect cert-manager pods Running
 [%collapsible]
 ====
-Confirm the operator is already running on this cluster.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get pods -n openshift-cert-manager
 ----
-
-TIP: cert-manager pods should be `Running`. If the namespace is empty, install **cert-manager Operator for Red Hat OpenShift** from OperatorHub (or the `openshift-cert-manager-operator` Subscription) and wait for the CRD in the next step.
 ====
 
-.Get CRD certificates.cert-manager.io
+.Get CRD certificates.cert-manager.io. Expect the CRD to exist
 [%collapsible]
 ====
-Without this CRD, `Certificate` objects will not apply.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get crd certificates.cert-manager.io
 ----
-
-TIP: The CRD exists. If not, install the operator and re-run.
 ====
 
-.List ClusterIssuers (self-signed vs ACME)
+.Get ClusterIssuers. Expect selfsigned and an acme issuer with Ready=True
 [%collapsible]
 ====
-Roadshow clusters typically already have `selfsigned` and an ACME issuer (for example `acme-bifrost-production-ddns`) used for the ingress wildcard. Part A uses self-signed. Part B uses ACME. You only *reference* them.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get clusterissuer
 ----
-
-TIP: `selfsigned` (or equivalent) and an `acme-*` issuer should show `Ready=True`. If `selfsigned` is missing, the next step creates it.
 ====
 
-.Ensure ClusterIssuer selfsigned exists
+.If ClusterIssuer selfsigned exists, show it. Otherwise apply ClusterIssuer selfsigned with spec.selfSigned empty. Expect Ready=True
 [%collapsible]
 ====
-Create it only when it is absent. Do not replace an ACME issuer.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 if oc get clusterissuer selfsigned >/dev/null 2>&1; then
@@ -97,28 +87,20 @@ spec:
 EOF
 fi
 ----
-
-TIP: `Ready=True` for `selfsigned`.
 ====
 
 .Create project 201-08-demo
 [%collapsible]
 ====
-Certificates and the demo Route land in this namespace.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 201-08-demo
 ----
-
-TIP: `Now using project "201-08-demo"`.
 ====
 
-.Apply Certificate example-cert (in-cluster name)
+.Apply Certificate example-cert in 201-08-demo with secretName example-cert-tls, issuerRef ClusterIssuer selfsigned, dnsNames example.201-08-demo.svc.cluster.local, duration 2160h, and renewBefore 360h
 [%collapsible]
 ====
-`secretName` is where cert-manager writes `tls.crt` / `tls.key`. `dnsNames` must match how services will call each other. Public CAs **will not** sign `.svc.cluster.local`—that is why east-west mTLS uses a private issuer.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<'EOF'
@@ -138,36 +120,26 @@ spec:
   renewBefore: 360h
 EOF
 ----
-
-TIP: `certificate.cert-manager.io/example-cert created`. `renewBefore` is the automation: cert-manager rotates the Secret before expiry without a ticket.
 ====
 
-.Get Certificate example-cert and Secret
+.Get Certificates in 201-08-demo, then get Secret example-cert-tls. Expect READY True and keys tls.crt and tls.key
 [%collapsible]
 ====
-Wait until Ready is True, then confirm the Secret.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get certificate -n 201-08-demo
 oc get secret example-cert-tls -n 201-08-demo
 ----
-
-TIP: `READY` is `True`. The Secret has `tls.crt` / `tls.key`. Mount that Secret into pods for mTLS (with NetworkPolicies from xref:101-05-network-policy-basics.adoc[101-05] so only the peers you intend can connect).
 ====
 
-.Show the self-signed issuer (not globally trusted)
+.Show issuer, subject, and dates for tls.crt in Secret example-cert-tls in 201-08-demo. Expect issuer equal to subject
 [%collapsible]
 ====
-`issuer` equals `subject` (or a CA nobody’s browser has). Default `curl` and browsers will not trust this.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get secret example-cert-tls -n 201-08-demo -o jsonpath='{.data.tls\.crt}' \
   | base64 -d | openssl x509 -noout -issuer -subject -dates
 ----
-
-TIP: Issuer is not a public CA. That is expected for Part A.
 ====
 
 === Part B: External signer (ACME) — globally recognized
@@ -193,11 +165,9 @@ The hook is one field: `issuerRef` names a ClusterIssuer that talks to a CA *out
 
 Let’s Encrypt will never issue for `*.svc.cluster.local`. Use ACME (or another public CA) for **Route hostnames**. Use a private/enterprise CA for pod-to-pod mTLS. Vault PKI wiring is xref:201-05-vault-csi.adoc[201-05]; SPIFFE identity is xref:301-08-zero-trust-workload-identity.adoc[301-08].
 
-.Pick the Ready ACME ClusterIssuer
+.Set ACME_ISSUER to the first Ready ClusterIssuer with spec.acme, print it, then show Certificate cert-manager-ingress-cert in openshift-ingress
 [%collapsible]
 ====
-Do not create a new ACME account. Reuse the issuer that already signs `cert-manager-ingress-cert`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 ACME_ISSUER=$(oc get clusterissuer -o json | jq -r '
@@ -208,29 +178,21 @@ ACME_ISSUER=$(oc get clusterissuer -o json | jq -r '
 echo "ACME ClusterIssuer: ${ACME_ISSUER:-NONE}"
 oc get certificate -n openshift-ingress cert-manager-ingress-cert 2>/dev/null || true
 ----
-
-TIP: You should see an issuer name (often `acme-bifrost-production-ddns`). The ingress Certificate is the cluster’s already-global example. If `NONE`, skip the apply below and only inspect the ingress cert with openssl—your platform owner has not installed ACME.
 ====
 
-.Inspect the public ingress certificate
+.Show issuer, subject, and dates for tls.crt in Secret cert-manager-ingress-cert in openshift-ingress. Expect a public ACME issuer
 [%collapsible]
 ====
-This leaf is already signed by a public CA. That is the “recognized globally” bar.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get secret cert-manager-ingress-cert -n openshift-ingress -o jsonpath='{.data.tls\.crt}' \
   | base64 -d | openssl x509 -noout -issuer -subject -dates
 ----
-
-TIP: Issuer is an ACME / Let’s Encrypt–style CA, not `selfsigned`. Browsers already trust it.
 ====
 
-.Deploy a small app and HTTP Route
+.Create Deployment public-app in 201-08-demo with image registry.access.redhat.com/ubi9/httpd-24, expose port 8080 and target port 8080, wait for rollout with timeout 120s, expose Service public-app, then print Route host $HOST
 [%collapsible]
 ====
-The Route hostname is the DNS name ACME can sign. Capture it; the Certificate `dnsNames` must match exactly.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create deployment public-app -n 201-08-demo \
@@ -241,15 +203,11 @@ oc expose service public-app -n 201-08-demo
 HOST=$(oc get route public-app -n 201-08-demo -o jsonpath='{.spec.host}')
 echo "$HOST"
 ----
-
-TIP: `HOST` is an `apps.` (or similar) DNS name, not `.svc.cluster.local`.
 ====
 
-.Issue a Certificate from the ACME ClusterIssuer
+.Set HOST from Route public-app in 201-08-demo and ACME_ISSUER to the first Ready ClusterIssuer with spec.acme, then apply Certificate public-route-cert in 201-08-demo with secretName public-route-tls, issuerRef ClusterIssuer $ACME_ISSUER, dnsNames $HOST, duration 2160h, and renewBefore 360h
 [%collapsible]
 ====
-Same `Certificate` kind as Part A. Only `issuerRef` and `dnsNames` change. cert-manager talks to the external ACME directory, solves the challenge already configured on that ClusterIssuer, and writes `public-route-tls`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 HOST=$(oc get route public-app -n 201-08-demo -o jsonpath='{.spec.host}')
@@ -280,11 +238,9 @@ spec:
 EOF
 fi
 ----
-
-TIP: `certificate.cert-manager.io/public-route-cert created`. Challenges can take a few minutes. If Ready stays False, `oc describe certificate public-route-cert -n 201-08-demo` — the ACME solver might only cover the ingress wildcard zone. You still have the global ingress cert from the previous step, and you still practiced the `issuerRef` hook.
 ====
 
-.Wait until public-route-cert is Ready
+.Get Certificate public-route-cert and Secret public-route-tls in 201-08-demo. Expect READY True
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -292,15 +248,11 @@ TIP: `certificate.cert-manager.io/public-route-cert created`. Challenges can tak
 oc get certificate public-route-cert -n 201-08-demo
 oc get secret public-route-tls -n 201-08-demo 2>/dev/null || true
 ----
-
-TIP: `READY True` means the external CA signed your hostname. `False` + ACME errors: do not edit the ClusterIssuer; use the ingress cert as the global example and keep Part A for mTLS.
 ====
 
-.Put the ACME Secret on the Route and curl without -k
+.If Secret public-route-tls exists in 201-08-demo, extract it to /tmp/201-08, replace Route public-app with edge TLS using tls.crt, tls.key, hostname $HOST, and insecure-policy Redirect, show the issuer, then curl https without -k. Expect HTTPS 200 or a redirect. Otherwise curl the Route host
 [%collapsible]
 ====
-Edge TLS with the issued Secret. Default `curl` should verify if ACME succeeded.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 HOST=$(oc get route public-app -n 201-08-demo -o jsonpath='{.spec.host}')
@@ -320,13 +272,11 @@ else
   curl -sI "https://${HOST}" | head -15
 fi
 ----
-
-TIP: HTTPS `200` (or a redirect) **without** `-k`. Compare `issuer=` here with Part A’s self-signed issuer. If verify fails, the Route may still be on the wildcard; `curl -vI` shows which cert the router presented.
 ====
 
 === Part C: What “global” means for mTLS vs Routes
 
-.Compare the two leaves
+.Compare issuer and subject for Secret example-cert-tls and Secret public-route-tls in 201-08-demo, or Secret cert-manager-ingress-cert in openshift-ingress if the ACME secret is missing
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -345,8 +295,6 @@ else
     | base64 -d | openssl x509 -noout -issuer -subject
 fi
 ----
-
-TIP: Two different issuers. Same `Certificate` API. The signer is what made one of them globally trusted.
 ====
 
 == Debrief

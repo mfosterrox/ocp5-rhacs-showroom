@@ -1,0 +1,93 @@
+= 1. See the vulnerable release
+:toc:
+:toclevels: 1
+
+== Overview
+
+The vulnerable application is already running. You confirm Argo CD, the original digest, the route, and the critical finding. You do not build this release.
+
+== Why it matters
+
+The patch starts from a release you can name. The digest in ConfigMap `help-im-vulnerable-digest` is that release. Later modules must move the running workload off this digest.
+
+== Confirm GitOps
+
+. Application `lightwell-java` is Synced and Healthy
++
+[source,bash,role=execute]
+----
+oc -n openshift-gitops get application lightwell-java \
+  -o jsonpath='sync={.status.sync.status}{"\n"}health={.status.health.status}{"\n"}'
+oc -n help-im-vulnerable get deploy,route,istag,job,configmap
+----
++
+Expected output includes:
++
+----
+sync=Synced
+health=Healthy
+deployment.apps/help-im-vulnerable
+route.route.openshift.io/help-im-vulnerable
+imagestreamtag.image.openshift.io/help-im-vulnerable:vulnerable
+configmap/help-im-vulnerable-baseline
+configmap/help-im-vulnerable-digest
+----
+
+. Read the pinned coordinates and the original digest
++
+[source,bash,role=execute]
+----
+oc -n help-im-vulnerable get configmap help-im-vulnerable-baseline \
+  -o jsonpath='cve={.data.critical-cve}{"\n"}woodstox={.data.woodstox}{"\n"}fix={.data.woodstox-fix}{"\n"}revision={.data.revision}{"\n"}'
+oc -n help-im-vulnerable get configmap help-im-vulnerable-digest \
+  -o jsonpath='{.data.dockerImageReference}{"\n"}'
+----
++
+Expected output:
++
+----
+cve=CVE-2022-40152
+woodstox=6.0.3
+fix=6.0.3.rhlw-00001
+revision=decfa713a0a705e4e388d359bd7eb16c51eaa946
+image-registry.openshift-image-registry.svc:5000/help-im-vulnerable/help-im-vulnerable@sha256:
+----
+
+The `sha256:` value is the vulnerable release. Copy it aside. Module 7 must produce a different digest.
+
+== Confirm the running service
+
+. Call the status API. The `version` field is the upstream coordinate the release was built with. `lightwellFix` is the rebuild you have not applied yet.
++
+[source,bash,role=execute]
+----
+HOST="$(oc -n help-im-vulnerable get route help-im-vulnerable -o jsonpath='{.spec.host}')"
+curl -sk "https://${HOST}/api/status" | jq '.[] | select(.library=="Woodstox")'
+----
++
+Expected output:
++
+----
+{
+  "library": "Woodstox",
+  "groupId": "com.fasterxml.woodstox",
+  "version": "6.0.3",
+  "cves": "CVE-2022-40152",
+  "lightwellFix": "6.0.3.rhlw-00001",
+  "loaded": true
+}
+----
+
+`loaded` true means the vulnerable jar is on the classpath. The page at `https://$HOST/` shows the same table.
+
+== Confirm RHACS
+
+. Open the *Red Hat Advanced Cluster Security* tab from the welcome page.
+. Go to *Vulnerability Management*.
+. Filter on namespace `help-im-vulnerable`.
+. Open the image for Deployment `help-im-vulnerable`.
+. Find `CVE-2022-40152`.
+
+CVE counts move as the feed updates. The finding to patch in this track is Woodstox `CVE-2022-40152` on version `6.0.3`.
+
+Continue with xref:lwjava-02-proxy.adoc[2. Lightwell repositories].

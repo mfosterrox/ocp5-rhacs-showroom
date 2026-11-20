@@ -1,0 +1,8 @@
+.OpenShift Security Response Exercises
+* xref:index.adoc[Overview]
+* xref:sr-01-environment.adoc[1. Workshop Environment]
+* xref:sr-02-incident.adoc[2. The Incident]
+* xref:sr-03-forensics.adoc[3. Forensic Investigation]
+* xref:sr-04-harden-workload.adoc[4. Harden the Workload]
+* xref:sr-05-process-baseline.adoc[5. Process Baselining]
+* xref:ROOT:index.adoc[Return to Welcome]

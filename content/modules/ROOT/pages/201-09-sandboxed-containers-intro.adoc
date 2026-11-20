@@ -3,6 +3,7 @@
 :skills: Kata Containers, RuntimeClass, Sandboxed Workloads
 :labid: LAB-201-09
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~15 minutes
@@ -36,39 +37,32 @@ Run a sandboxed workload and contrast it with a normal pod so you know when stro
 * Worker nodes with virtualization support (VT-x/AMD-V)
 * Cluster admin permissions
 
-Click each step only if you need a hint.
+Click each step for the full solution.
 
-.Get the Sandboxed Containers CSV
+:lab-run-module: 201-09
+include::partial$lab-run.adoc[]
+
+.Get CSVs in openshift-sandboxed-containers matching sandbox, or print Install Sandboxed Containers Operator from OperatorHub
 [%collapsible]
 ====
-Confirm the operator is installed before you create a Kata pod.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get csv -n openshift-sandboxed-containers 2>/dev/null | grep -i sandbox || echo "Install Sandboxed Containers Operator from OperatorHub"
 ----
-
-TIP: A CSV line prints, or you get the install reminder.
 ====
 
-.Get RuntimeClass kata
+.Get RuntimeClasses matching kata. Expect a kata RuntimeClass
 [%collapsible]
 ====
-Pods select Kata with `runtimeClassName: kata`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get runtimeclass | grep -i kata
 ----
-
-TIP: A `kata` RuntimeClass is listed. If not, apply one in the next step.
 ====
 
-.Apply RuntimeClass kata if it is missing
+.Apply RuntimeClass kata with handler kata
 [%collapsible]
 ====
-Skip this if `oc get runtimeclass` already showed `kata`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<'EOF'
@@ -79,8 +73,6 @@ metadata:
 handler: kata
 EOF
 ----
-
-TIP: `runtimeclass.node.k8s.io/kata created` (or already exists).
 ====
 
 .Create project 201-09-s-sandbox
@@ -90,28 +82,20 @@ TIP: `runtimeclass.node.k8s.io/kata created` (or already exists).
 ----
 oc new-project 201-09-s-sandbox
 ----
-
-TIP: `Now using project "201-09-s-sandbox"`.
 ====
 
-.Run pod regular
+.Run pod regular with image registry.access.redhat.com/ubi9/ubi and command sleep 3600
 [%collapsible]
 ====
-This is the shared-kernel baseline.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc run regular --image=registry.access.redhat.com/ubi9/ubi -- sleep 3600
 ----
-
-TIP: `pod/regular created`. Wait until it is Running.
 ====
 
-.Apply pod kata-pod
+.Apply Pod kata-pod with runtimeClassName kata, container app, image registry.access.redhat.com/ubi9/ubi, and command uname -a, ps -ef, and sleep 3600
 [%collapsible]
 ====
-`runtimeClassName: kata` is the isolation switch.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<'EOF'
@@ -127,47 +111,33 @@ spec:
     command: ["sh","-c","uname -a; ps -ef; sleep 3600"]
 EOF
 ----
-
-TIP: `pod/kata-pod created`. Wait until it is Running (Kata can take longer to start).
 ====
 
-.Exec ps on pod regular
+.Exec ps -ef on pod regular and show the first lines
 [%collapsible]
 ====
-Shared-kernel pods often see more host-adjacent processes.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec regular -- ps -ef | head
 ----
-
-TIP: Note how many processes appear. You will compare this to Kata.
 ====
 
-.Exec ps on pod kata-pod
+.Exec ps -ef on pod kata-pod and show the first lines. Expect fewer processes than pod regular
 [%collapsible]
 ====
-Kata should show a thinner process list; the guest VM hides the node’s process table.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec kata-pod -- ps -ef | head
 ----
-
-TIP: Fewer host processes than `regular`.
 ====
 
-.Read the SCC annotation on kata-pod
+.Read annotation openshift.io/scc on pod kata-pod. Expect an SCC name
 [%collapsible]
 ====
-Sandboxing does not replace SCC. Confirm which SCC still applied.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get pod kata-pod -o jsonpath='{.metadata.annotations.openshift\.io/scc}{"\n"}'
 ----
-
-TIP: An SCC name prints (often `restricted` or similar). Kata is extra isolation on top.
 ====
 
 == Debrief

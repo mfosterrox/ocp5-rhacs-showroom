@@ -3,6 +3,7 @@
 :cis-summary: "Use OpenShift projects and namespaces as security boundaries for multi-tenancy and resource isolation."
 :mitre-summary: "Prevents unauthorized access and resource conflicts by establishing namespace-level security boundaries."
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~15 minutes
@@ -34,85 +35,56 @@ Clear project boundaries make ownership obvious and keep mistakes contained.
 == Your Mission
 Without project boundaries, one compromised identity or runaway workload can reach every tenant’s Secrets, CPU, and pods. Draw hard lines—labels, RBAC, and quotas—so a break-in stays trapped in one namespace instead of becoming a cluster-wide outage.
 
-Click each step only if you need a hint.
+Each title has the values for that step. Open it for the command.
 
-.Create project 101-02-demo
+:lab-run-module: 101-02
+include::partial$lab-run.adoc[]
+
+.Create project 101-02-demo with display name "Security Demo" and description "101-02 Lab Project"
 [%collapsible]
 ====
-Stand up a dedicated project so this tenant has its own boundary -- not shared free-for-all space.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 101-02-demo --display-name="Security Demo" --description="101-02 Lab Project"
 ----
-
-TIP: `Now using project "101-02-demo"`.
 ====
 
-.Label namespace 101-02-demo security-tier and environment
+.Label namespace 101-02-demo with security-tier=basic and environment=dev, then show its labels
 [%collapsible]
 ====
-Label the namespace so policy engines (and operators) can target this tenant by security tier and environment.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc label namespace 101-02-demo security-tier=basic environment=dev
-----
-
-Confirm the labels stuck on the project:
-
-[source,bash,subs="+macros,+attributes",role=execute]
-----
 oc get namespace 101-02-demo --show-labels
 ----
-
-TIP: Labels should include `security-tier=basic` and `environment=dev`.
 ====
 
-.Create RoleBinding dev-team with clusterrole edit
+.Create RoleBinding dev-team in 101-02-demo granting ClusterRole edit to group dev-team
 [%collapsible]
 ====
-Bind group `dev-team` to `edit` only inside this project.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create rolebinding dev-team --clusterrole=edit --group=dev-team -n 101-02-demo
 ----
-
-TIP: `rolebinding.rbac.authorization.k8s.io/dev-team created`.
 ====
 
-.Confirm the default SA cannot create pods
+.Confirm service account system:serviceaccount:101-02-demo:default cannot create pods in 101-02-demo. Expect no
 [%collapsible]
 ====
-The default service account is still denied. That closes the "any SA can do anything" path.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc auth can-i create pods --as=system:serviceaccount:101-02-demo:default -n 101-02-demo
 ----
-
-NOTE: Expect `no`. The RoleBinding targets the `dev-team` group; the default service account is still denied.
 ====
 
-.Create ResourceQuota demo-quota in 101-02-demo
+.Create ResourceQuota demo-quota in 101-02-demo with requests.cpu=2, requests.memory=2Gi, limits.cpu=4, limits.memory=4Gi, pods=10, then describe it
 [%collapsible]
 ====
-Buggy apps (and noisy neighbors) burn the cluster with oversized requests. Put a ceiling on CPU, memory, and pods so one namespace cannot starve the rest.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create quota demo-quota --hard=requests.cpu=2,requests.memory=2Gi,limits.cpu=4,limits.memory=4Gi,pods=10 -n 101-02-demo
-----
-
-Inspect the quota to confirm the hard limits and current usage:
-
-[source,bash,subs="+macros,+attributes",role=execute]
-----
 oc describe quota demo-quota -n 101-02-demo
 ----
-
-TIP: Hard limits should show 2 CPU request, 2Gi memory, 10 pods.
 ====
 
 == Challenge: onboard a new team
@@ -168,46 +140,32 @@ Before you open the solution, verify your own work:
 
 === Solution (try yourself first)
 
-Click each step only if you need a hint.
+Each title has the values for that step. Open it for the command.
 
-.Create project team-payments-dev
+.Create project team-payments-dev with display name "Payments Team (Dev)" and description "Default project for Payments team development workloads"
 [%collapsible]
 ====
-Use the display name and description from the requirements table.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project team-payments-dev \
   --display-name="Payments Team (Dev)" \
   --description="Default project for Payments team development workloads"
 ----
-
-TIP: `Now using project "team-payments-dev"`.
 ====
 
-.Label team-payments-dev with team, environment, and security-tier
+.Label namespace team-payments-dev with team=payments, environment=dev, and security-tier=basic, then show its labels
 [%collapsible]
 ====
-Labels: `team=payments`, `environment=dev`, `security-tier=basic`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc label namespace team-payments-dev team=payments environment=dev security-tier=basic
-----
-
-[source,bash,subs="+macros,+attributes",role=execute]
-----
 oc get namespace team-payments-dev --show-labels
 ----
-
-TIP: All three labels should appear on the namespace.
 ====
 
-.Create RoleBinding payments-devs with clusterrole edit
+.Create RoleBinding payments-devs in team-payments-dev granting ClusterRole edit to group payments-devs
 [%collapsible]
 ====
-Grant ClusterRole `edit` to group `payments-devs` in this project only.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create rolebinding payments-devs \
@@ -215,43 +173,29 @@ oc create rolebinding payments-devs \
   --group=payments-devs \
   -n team-payments-dev
 ----
-
-TIP: `rolebinding.rbac.authorization.k8s.io/payments-devs created`.
 ====
 
-.Confirm the default SA cannot create pods
+.Confirm service account system:serviceaccount:team-payments-dev:default cannot create pods in team-payments-dev. Expect no
 [%collapsible]
 ====
-The default service account in `team-payments-dev` should still be denied.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc auth can-i create pods \
   --as=system:serviceaccount:team-payments-dev:default \
   -n team-payments-dev
 ----
-
-TIP: Expect `no`.
 ====
 
-.Create ResourceQuota team-quota and describe it
+.Create ResourceQuota team-quota in team-payments-dev with requests.cpu=1, requests.memory=1Gi, limits.cpu=2, limits.memory=2Gi, pods=5, then describe it
 [%collapsible]
 ====
-Hard limits: `requests.cpu=1`, `requests.memory=1Gi`, `limits.cpu=2`, `limits.memory=2Gi`, `pods=5`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create quota team-quota \
   --hard=requests.cpu=1,requests.memory=1Gi,limits.cpu=2,limits.memory=2Gi,pods=5 \
   -n team-payments-dev
-----
-
-[source,bash,subs="+macros,+attributes",role=execute]
-----
 oc describe quota team-quota -n team-payments-dev
 ----
-
-TIP: `oc describe` should list the hard limits from the table.
 ====
 
 == Debrief

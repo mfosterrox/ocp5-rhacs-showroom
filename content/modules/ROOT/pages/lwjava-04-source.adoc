@@ -1,0 +1,37 @@
+= 4. Update the source
+:toc:
+:toclevels: 1
+
+== Overview
+
+The next image has to be built from the pom you just edited. This working copy is that source. The GitOps BuildConfig still points at the vulnerable commit. You will pass this directory into the build in module 7.
+
+== Why it matters
+
+A pin that never reaches the build source does not change the running image. Argo CD will keep deploying whatever digest the ImageStreamTag points at.
+
+== Confirm the working tree
+
+. The only change is `pom.xml`, and the commit under it is still the vulnerable release
++
+[source,bash,role=execute]
+----
+cd "${HOME}/help-im-vulnerable"
+git rev-parse HEAD
+git status --short
+----
++
+Expected output:
++
+----
+decfa713a0a705e4e388d359bd7eb16c51eaa946
+ M pom.xml
+----
+
+Do not commit this to the upstream demo repository. You do not have push access there, and the workshop build reads the directory you pass to `oc start-build`.
+
+== Verify
+
+`git status --short` prints ` M pom.xml` and nothing else. `git diff -- pom.xml` contains the `.rhlw` versions from xref:lwjava-03-pin.adoc[module 3].
+
+Continue with xref:lwjava-05-bind.adoc[5. Bind the Lightwell versions].

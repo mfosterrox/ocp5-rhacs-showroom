@@ -1,15 +1,30 @@
 #!/usr/bin/env bash
 # Provision the ACS roadshow lab environment on the bastion host.
-# Runs RHACS CLI token setup, clones demo-apps (for Dockerfiles), and
-# builds/pushes Quay images. Cluster-wide RHACS/Compliance/demo-app
-# deploy is owned by OpenShift GitOps (roadshow-prereqs + roadshow-demo-apps).
+# Quay, MinIO, workshop images, and the Central Quay integration are applied
+# by OpenShift GitOps. Lightspeed already uses the platform model.
+# This script registers the ACS MCP server with Lightspeed when that
+# server is present, reads Quay and RHACS credentials into the shell,
+# creates a Quay account token (QUAY_TOKEN), and installs TSSC CLIs
+# (cosign, oc-mirror, ec, and mvn).
+# Cluster-wide RHACS/Compliance/demo-app deploy is owned by OpenShift GitOps
+# (roadshow-prereqs + roadshow-demo-apps). The Lightwell Java vulnerable
+# release is the Argo CD Application lightwell-java. This script waits for
+# that Application. It does not oc apply that workload. It also enables
+# bash tab completion for oc, kubectl, and roxctl. This script also applies
+# rhel-webserver in rhacs-virt-webserver and the checkout-service and
+# ledger-service user-defined networks under setup/user-defined-network/.
+# rhel-webserver joins checkout-service with the checkout containers.
+# GitOps keeps rhel9-vm in rhacs-virt. Those networks do not modify
+# demo-apps namespaces.
 #
 # Quiet by default (progress bar + current step). Use --verbose for full logs.
 #
 # Usage:
-#   bash setup/lab-environment.sh \
-#     --quay-user QUAYADMIN \
-#     --quay-password 'secret'
+#   bash setup/lab-environment.sh
+#
+# Quay admin credentials are read from the quay-admin-password secret.
+# Setup also creates a Quay account token and saves it as QUAY_TOKEN.
+# Optional --quay-user / --quay-password are ignored; GitOps owns that account.
 #
 # After making the frontend repository public in Quay UI:
 #   bash setup/lab-environment.sh --deploy-skupper-only
@@ -38,6 +53,11 @@ ROADSHOW_ENV_FILE="${HOME}/.acs-roadshow/env"
 # current Alpine (3.24.1 today); catalog Clair indexes it but leaves version_id
 # empty, so Quay's Security Scan column shows Passed / namespace "".
 PYTHON_ALPINE_BASE="${PYTHON_ALPINE_BASE:-docker.io/library/python:3.12-alpine3.20}"
+# quay.io/minio/minio rejects anonymous pulls. quay.io/thanos/minio keeps the
+# original RELEASE.2025-09-07T16-13-09Z image (there is no "latest" tag).
+# Same entrypoint and /usr/bin/minio as the image Quay was already running.
+# Override with MINIO_REPLACEMENT_IMAGE.
+MINIO_REPLACEMENT_IMAGE="${MINIO_REPLACEMENT_IMAGE:-quay.io/thanos/minio:RELEASE.2025-09-07T16-13-09Z}"
 # TSSC CLIs: same registry.redhat.io pins as Lightwell Showroom (no github.com).
 COSIGN_IMAGE="${COSIGN_IMAGE:-registry.redhat.io/rhtas/cosign-rhel9:1.3.0}"
 OC_MIRROR_IMAGE="${OC_MIRROR_IMAGE:-registry.redhat.io/openshift4/oc-mirror-plugin-rhel9:v4.20}"
@@ -75,7 +95,7 @@ load_roadshow_env() {
     local line
     while IFS= read -r line || [[ -n "${line}" ]]; do
       case "${line}" in
-        export\ ROX_*|export\ QUAY_*|export\ TUTORIAL_HOME=*|export\ APP_HOME=*|export\ RHACS_NAMESPACE=*)
+        export\ ROX_*|export\ QUAY_*|export\ TUTORIAL_HOME=*|export\ APP_HOME=*|export\ RHACS_NAMESPACE=*|export\ GRPC_ENFORCE_ALPN_ENABLED=*)
           # shellcheck disable=SC2163
           eval "${line}"
           ;;
@@ -89,10 +109,11 @@ usage() {
 Usage: lab-environment.sh [options]
 
 Options:
-  --quay-user USER          Quay admin username (required unless --deploy-skupper-only or --install-tssc-clis-only)
-  --quay-password PASS      Quay admin password (required unless --deploy-skupper-only or --install-tssc-clis-only)
+  --quay-user USER          Ignored. Quay admin comes from the GitOps secret
+  --quay-password PASS      Ignored. Quay admin comes from the GitOps secret
   --deploy-skupper-only     Deploy patient-portal after frontend repo is public in Quay
-  --install-tssc-clis-only  Install cosign, oc-mirror, and ec into ~/.local/bin, then exit
+  --install-tssc-clis-only  Install cosign, oc-mirror, and ec into ~/.local/bin,
+                            install the maven RPM, then exit
   --skip-demo-apps          Skip cloning the demo-apps repository
   --apply-demo-apps         oc apply demo-apps manifests (GitOps deploys these by default)
   --skip-images             Skip golden image and frontend build/push
@@ -101,6 +122,11 @@ Options:
   --verbose                 Stream detailed command output
   --work-dir DIR            Base directory for clones (default: $HOME)
   -h, --help                Show this help
+
+Environment:
+  MINIO_REPLACEMENT_IMAGE   Public image used when Quay's MinIO pod cannot pull
+                            quay.io/minio/minio. Default:
+                            quay.io/thanos/minio:RELEASE.2025-09-07T16-13-09Z
 EOF
 }
 
@@ -152,6 +178,93 @@ ensure_lab_local_bin() {
   if ! grep -qE '(^|:)\$HOME/\.local/bin|^export PATH="\$HOME/\.local/bin' "${HOME}/.bashrc" 2>/dev/null; then
     printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "${HOME}/.bashrc"
   fi
+}
+
+# Write bash completion for the lab CLIs and source it from interactive shells.
+# Do not source ~/.bashrc from this script. Bastion images often exit when it
+# is read by a non-interactive shell.
+ensure_shell_completion() {
+  local comp_dir="${HOME}/.local/share/bash-completion/completions"
+  local bashrc="${HOME}/.bashrc"
+  local marker_begin="# BEGIN roadshow-shell-completion"
+  local marker_end="# END roadshow-shell-completion"
+  local cmd file tmp block
+  mkdir -p "${comp_dir}"
+  touch "${bashrc}"
+
+  if [[ ! -r /usr/share/bash-completion/bash_completion ]]; then
+    if command -v dnf >/dev/null 2>&1; then
+      sudo dnf install -y bash-completion || echo "NOTE: bash-completion package was not installed."
+    elif command -v yum >/dev/null 2>&1; then
+      sudo yum install -y bash-completion || echo "NOTE: bash-completion package was not installed."
+    fi
+  fi
+
+  for cmd in oc kubectl roxctl; do
+    if ! command -v "${cmd}" >/dev/null 2>&1; then
+      echo "${cmd} is not on PATH; skipping its completion."
+      continue
+    fi
+    file="${comp_dir}/${cmd}"
+    tmp="${file}.tmp"
+    if ! "${cmd}" completion bash > "${tmp}"; then
+      rm -f "${tmp}"
+      echo "NOTE: ${cmd} completion bash failed; skipping ${cmd}."
+      continue
+    fi
+    if [[ ! -s "${tmp}" ]]; then
+      rm -f "${tmp}"
+      echo "NOTE: ${cmd} completion bash wrote an empty script; skipping ${cmd}."
+      continue
+    fi
+    mv "${tmp}" "${file}"
+    echo "Wrote ${cmd} completion -> ${file}"
+  done
+
+  block=$(cat <<'EOF'
+# BEGIN roadshow-shell-completion
+# Tab completion for oc, kubectl, and roxctl. Interactive shells only.
+if [[ $- == *i* ]]; then
+  if [[ -r /usr/share/bash-completion/bash_completion ]]; then
+    # shellcheck disable=SC1091
+    source /usr/share/bash-completion/bash_completion
+  fi
+  if [[ -r "${HOME}/.local/share/bash-completion/completions/oc" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOME}/.local/share/bash-completion/completions/oc"
+  fi
+  if [[ -r "${HOME}/.local/share/bash-completion/completions/kubectl" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOME}/.local/share/bash-completion/completions/kubectl"
+  elif declare -F __start_oc >/dev/null 2>&1; then
+    complete -o default -F __start_oc kubectl 2>/dev/null || true
+  fi
+  if [[ -r "${HOME}/.local/share/bash-completion/completions/roxctl" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOME}/.local/share/bash-completion/completions/roxctl"
+  fi
+fi
+# END roadshow-shell-completion
+EOF
+)
+
+  if grep -qF "${marker_begin}" "${bashrc}"; then
+    tmp="$(mktemp)"
+    awk -v begin="${marker_begin}" -v end="${marker_end}" '
+      $0 == begin { skip = 1; next }
+      $0 == end { skip = 0; next }
+      skip != 1 { print }
+    ' "${bashrc}" > "${tmp}"
+    printf '\n%s\n' "${block}" >> "${tmp}"
+    mv "${tmp}" "${bashrc}"
+  else
+    printf '\n%s\n' "${block}" >> "${bashrc}"
+  fi
+  echo "Shell completion enabled. Open a new terminal or run: source ~/.bashrc"
+}
+
+do_shell_completion() {
+  ensure_shell_completion
 }
 
 # Copy a named binary out of a registry.redhat.io image (same method as Lightwell Showroom).
@@ -245,12 +358,14 @@ ensure_tssc_clis() {
   install_cli_from_rh_image cosign "${COSIGN_IMAGE}" || return 1
   install_cli_from_rh_image oc-mirror "${OC_MIRROR_IMAGE}" || return 1
   install_cli_from_rh_image ec "${EC_IMAGE}" || return 1
+  ensure_maven || return 1
   echo "TSSC CLIs on PATH:"
   command -v cosign
   command -v oc-mirror
   command -v ec
+  command -v mvn
   cosign version || true
-  oc-mirror version || true
+  oc-mirror version --v2 || true
   ec version || ec --version || true
   echo "If command -v still prints nothing in this SSH session, run: source ~/.bashrc"
 }
@@ -269,35 +384,217 @@ if [[ "${INSTALL_TSSC_CLIS_ONLY}" == true ]]; then
   exit 0
 fi
 
-if [[ -z "${QUAY_USER}" || -z "${QUAY_PASSWORD}" ]]; then
-  echo "Error: --quay-user and --quay-password are required for full setup." >&2
-  usage
-  exit 1
-fi
-if [[ "${QUAY_USER}" == *'{'* || "${QUAY_PASSWORD}" == *'{'* ]]; then
-  echo "Error: --quay-user / --quay-password still contain Showroom placeholders." >&2
-  echo "Use the values from the credentials table (username is usually admin), not {quay_admin_username}." >&2
-  exit 1
-fi
+# Quay, workshop images, and the Central registry integration come from GitOps.
+# This script registers ACS MCP with Lightspeed, writes local CLI env, and installs TSSC binaries.
+load_roadshow_env
 
-# Count top-level lab steps (cluster RHACS/Compliance/apps come from GitOps)
+# Count top-level lab steps.
 TOTAL=0
-TOTAL=$((TOTAL + 3)) # admin + tssc clis + wait central
+TOTAL=$((TOTAL + 10)) # admin + lightwell java + user-defined network + ACS MCP + quay env + tssc clis + CLI vars + verify API + shell completion + ACS VM
 [[ "${SKIP_RHACS_CONFIGURE}" != true ]] && TOTAL=$((TOTAL + 1))
-TOTAL=$((TOTAL + 2)) # CLI vars + verify API
 [[ "${SKIP_DEMO_APPS}" != true ]] && TOTAL=$((TOTAL + 1)) # clone
 [[ "${SKIP_DEMO_APPS}" != true && "${SKIP_DEMO_APPLY}" != true ]] && TOTAL=$((TOTAL + 1)) # apply
-[[ "${SKIP_IMAGES}" != true ]] && TOTAL=$((TOTAL + 3)) # quay login + golden + frontend
 
 LOG_DIR="${HOME}/.acs-roadshow"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/lab-environment-$(date +%Y%m%d-%H%M%S).log"
 progress_init "${TOTAL}" "${LOG_FILE}" "Lab environment setup"
 
+# Register the ACS MCP server on OLSConfig when the server and token exist.
+# The GitOps hook often runs before OLSConfig is created, and it must not
+# replace this entry with a guessed service name.
+lightspeed_ensure_acs_mcp() {
+  local ns="openshift-lightspeed"
+  local mcp_ns="rhacs-mcp"
+  local svc="rhacs-mcp-server-stackrox-mcp"
+  local url="https://${svc}.${mcp_ns}.svc:443/mcp"
+  if ! oc -n "${mcp_ns}" get svc "${svc}" >/dev/null 2>&1; then
+    echo "ACS MCP service ${svc} is not installed. Skipping Lightspeed registration."
+    return 0
+  fi
+  if ! oc -n "${ns}" get secret acs-mcp-api-token >/dev/null 2>&1; then
+    echo "Secret ${ns}/acs-mcp-api-token is missing. Skipping Lightspeed registration."
+    return 0
+  fi
+  if ! oc get olsconfig cluster >/dev/null 2>&1; then
+    echo "OLSConfig/cluster is missing. Skipping ACS MCP registration."
+    return 0
+  fi
+  oc get olsconfig cluster -o json | ACS_MCP_URL="${url}" python3 -c '
+import json, os, sys
+doc = json.load(sys.stdin)
+spec = doc.get("spec") or {}
+gates = list(spec.get("featureGates") or [])
+if "MCPServer" not in gates:
+    gates.append("MCPServer")
+servers = [s for s in (spec.get("mcpServers") or []) if not (isinstance(s, dict) and s.get("name") == "acs-mcp")]
+servers.append({
+    "name": "acs-mcp",
+    "url": os.environ["ACS_MCP_URL"],
+    "timeout": 120,
+    "headers": [{
+        "name": "Authorization",
+        "valueFrom": {
+            "type": "secret",
+            "secretRef": {"name": "acs-mcp-api-token"},
+        },
+    }],
+})
+json.dump({"spec": {"featureGates": gates, "mcpServers": servers}}, sys.stdout)
+' | oc patch olsconfig cluster --type=merge --patch-file=/dev/stdin >/dev/null
+  echo "Lightspeed OLSConfig includes acs-mcp (${url})"
+}
+
+# Read the Quay admin account GitOps already created. Do not generate another password.
+load_quay_env() {
+  local ns="quay"
+  if ! oc -n "${ns}" get secret quay-admin-password >/dev/null 2>&1; then
+    echo "Error: secret ${ns}/quay-admin-password is missing. Wait for the Quay GitOps application." >&2
+    return 1
+  fi
+  QUAY_USER="$(oc -n "${ns}" get secret quay-admin-password -o jsonpath='{.data.username}' | base64 -d)"
+  QUAY_PASSWORD="$(oc -n "${ns}" get secret quay-admin-password -o jsonpath='{.data.password}' | base64 -d)"
+  QUAY_URL="$(detect_quay_url)" || {
+    echo "Error: could not find a Quay route in ${ns}." >&2
+    return 1
+  }
+  persist_var QUAY_USER "${QUAY_USER}"
+  persist_var QUAY_PASSWORD "${QUAY_PASSWORD}"
+  persist_var QUAY_URL "${QUAY_URL}"
+  echo "Using Quay at ${QUAY_URL}"
+  ensure_quay_account_token
+}
+
+# Session cookie plus X-CSRF-Token. Quay rejects POST /api/v1 without both.
+quay_csrf_token() {
+  local jar=$1
+  curl -sk -c "${jar}" -b "${jar}" "https://${QUAY_URL}/csrf_token" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["csrf_token"])'
+}
+
+quay_account_token_works() {
+  local home
+  [[ -n "${QUAY_TOKEN:-}" && -n "${QUAY_USER:-}" && -n "${QUAY_URL:-}" ]] || return 1
+  # First setup run creates the token before cosign is installed. A later run
+  # checks the saved token with cosign login against the Quay route.
+  command -v cosign >/dev/null 2>&1 || return 0
+  home="$(mktemp -d)"
+  if HOME="${home}" cosign login -u "${QUAY_USER}" -p "${QUAY_TOKEN}" "${QUAY_URL}" >/dev/null 2>&1; then
+    rm -rf "${home}"
+    return 0
+  fi
+  rm -rf "${home}"
+  return 1
+}
+
+# Long-lived account token for podman/cosign login and the Quay API.
+# Reuse QUAY_TOKEN when it still authenticates. The secret is only returned
+# at creation time, so a failed reuse creates a new lab-environment token.
+ensure_quay_account_token() {
+  local jar csrf code token
+  if quay_account_token_works; then
+    echo "Quay account token already set"
+    persist_var QUAY_TOKEN "${QUAY_TOKEN}"
+    return 0
+  fi
+  jar="$(mktemp)"
+  csrf="$(quay_csrf_token "${jar}")" || {
+    rm -f "${jar}"
+    echo "Error: could not read a Quay CSRF token from https://${QUAY_URL}/csrf_token." >&2
+    return 1
+  }
+  code="$(curl -sk -c "${jar}" -b "${jar}" -o /tmp/quay-signin.json -w '%{http_code}' \
+    -X POST "https://${QUAY_URL}/api/v1/signin" \
+    -H 'Content-Type: application/json' \
+    -H "X-CSRF-Token: ${csrf}" \
+    -d "$(QUAY_USER="${QUAY_USER}" QUAY_PASSWORD="${QUAY_PASSWORD}" python3 -c 'import json,os; print(json.dumps({"username":os.environ["QUAY_USER"],"password":os.environ["QUAY_PASSWORD"]}))')")" || true
+  if [[ "${code}" != "200" ]]; then
+    rm -f "${jar}"
+    echo "Error: Quay sign-in returned HTTP ${code:-000}; cannot create an account token." >&2
+    return 1
+  fi
+  csrf="$(quay_csrf_token "${jar}")"
+  # Drop earlier lab-environment tokens. Their secrets cannot be read back.
+  curl -sk -c "${jar}" -b "${jar}" -o /tmp/quay-apptokens.json \
+    -H "X-CSRF-Token: ${csrf}" \
+    "https://${QUAY_URL}/api/v1/user/apptoken" >/dev/null || true
+  python3 - <<'PY' > /tmp/quay-apptoken-uuids
+import json
+try:
+    items = json.load(open("/tmp/quay-apptokens.json")).get("tokens") or []
+except Exception:
+    items = []
+for item in items:
+    if item.get("title", "").startswith("lab-environment") and item.get("uuid"):
+        print(item["uuid"])
+PY
+  while read -r uuid; do
+    [[ -n "${uuid}" ]] || continue
+    csrf="$(quay_csrf_token "${jar}")"
+    curl -sk -c "${jar}" -b "${jar}" -o /dev/null \
+      -X DELETE "https://${QUAY_URL}/api/v1/user/apptoken/${uuid}" \
+      -H "X-CSRF-Token: ${csrf}" || true
+  done < /tmp/quay-apptoken-uuids
+  csrf="$(quay_csrf_token "${jar}")"
+  code="$(curl -sk -c "${jar}" -b "${jar}" -o /tmp/quay-apptoken.json -w '%{http_code}' \
+    -X POST "https://${QUAY_URL}/api/v1/user/apptoken" \
+    -H 'Content-Type: application/json' \
+    -H "X-CSRF-Token: ${csrf}" \
+    -d '{"title":"lab-environment"}')" || true
+  rm -f "${jar}" /tmp/quay-signin.json /tmp/quay-apptokens.json /tmp/quay-apptoken-uuids
+  if [[ "${code}" != "200" && "${code}" != "201" ]]; then
+    rm -f /tmp/quay-apptoken.json
+    echo "Error: Quay account token request returned HTTP ${code:-000}." >&2
+    return 1
+  fi
+  token="$(python3 -c '
+import json
+value = json.load(open("/tmp/quay-apptoken.json")).get("token")
+if isinstance(value, dict):
+    value = value.get("token_code") or value.get("token") or ""
+print(value or "")
+')"
+  rm -f /tmp/quay-apptoken.json
+  if [[ -z "${token}" ]]; then
+    echo "Error: Quay did not return an account token." >&2
+    return 1
+  fi
+  persist_var QUAY_TOKEN "${token}"
+  unset token
+  echo "Quay account token saved"
+}
+
 do_verify_admin() {
   oc config use-context admin 2>/dev/null || oc config use-context "$(oc config get-contexts -o name | head -1)"
   oc whoami
   oc get nodes --no-headers | head -5
+}
+
+# The vulnerable Help I'm Vulnerable release is deployed by Argo CD
+# (Application lightwell-java). Wait until that release is ready.
+# Do not oc apply it here. Self-heal would fight a second deployer.
+do_wait_lightwell_java() {
+  local app="lightwell-java"
+  local gitops_ns="openshift-gitops"
+  local deploy_ns="help-im-vulnerable"
+  local i sync health
+  if ! oc -n "${gitops_ns}" get application "${app}" >/dev/null 2>&1; then
+    echo "NOTE: Argo CD Application ${app} is not on this cluster yet. Continuing."
+    return 0
+  fi
+  for i in $(seq 1 120); do
+    sync="$(oc -n "${gitops_ns}" get application "${app}" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+    health="$(oc -n "${gitops_ns}" get application "${app}" -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+    echo "lightwell-java sync=${sync:-unknown} health=${health:-unknown} (${i}/120)"
+    if [[ "${sync}" == "Synced" && "${health}" == "Healthy" ]]; then
+      oc -n "${deploy_ns}" rollout status deployment/help-im-vulnerable --timeout=180s
+      return 0
+    fi
+    sleep 15
+  done
+  echo "Error: Application ${app} did not become Synced and Healthy within 30 minutes." >&2
+  oc -n "${gitops_ns}" describe application "${app}" >&2 || true
+  return 1
 }
 
 do_wait_central() {
@@ -309,13 +606,75 @@ do_wait_central() {
       return 0
     fi
   done
-  echo "Error: RHACS Central route not found (tried namespaces rhacs-operator, stackrox)." >&2
+  echo "Error: RHACS Central route not found (tried acs, rhacs-operator, and stackrox)." >&2
   echo "Ensure the GitOps rhacs-operator Application has synced." >&2
   return 1
 }
 
+# Pods cannot open the apps load-balancer address. After Quay is up, point its
+# route hostname at the in-cluster router so Central and Scanner can pull from it.
+map_quay_route_for_central() {
+  local quay_host router_ip ns central_cr patch deploy
+  quay_host="$(detect_quay_url)" || {
+    echo "Error: Quay route not found; cannot map it for Central." >&2
+    return 1
+  }
+  router_ip="$(oc -n openshift-ingress get svc router-internal-default -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+  if [[ -z "${router_ip}" ]]; then
+    echo "Error: Service openshift-ingress/router-internal-default has no cluster IP." >&2
+    return 1
+  fi
+  ns="$(detect_rhacs_namespace)" || {
+    echo "Error: Central deployment not found (tried acs, rhacs-operator, and stackrox)." >&2
+    return 1
+  }
+  central_cr="$(oc -n "${ns}" get central -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [[ -z "${central_cr}" ]]; then
+    echo "Error: Central custom resource not found in ${ns}." >&2
+    return 1
+  fi
+  if QUAY_HOST="${quay_host}" ROUTER_IP="${router_ip}" \
+    oc -n "${ns}" get central "${central_cr}" -o json | python3 -c '
+import json, os, sys
+host = os.environ["QUAY_HOST"]
+ip = os.environ["ROUTER_IP"]
+spec = json.load(sys.stdin).get("spec") or {}
+checks = [
+    ((spec.get("central") or {}).get("hostAliases") or []),
+    (((spec.get("scannerV4") or {}).get("indexer") or {}).get("hostAliases") or []),
+    (((spec.get("scannerV4") or {}).get("matcher") or {}).get("hostAliases") or []),
+]
+def has_alias(aliases):
+    return any(a.get("ip") == ip and host in (a.get("hostnames") or []) for a in aliases)
+sys.exit(0 if all(has_alias(group) for group in checks) else 1)
+'; then
+    echo "Quay route ${quay_host} already maps to router ${router_ip}"
+    return 0
+  fi
+  patch="$(QUAY_HOST="${quay_host}" ROUTER_IP="${router_ip}" python3 -c '
+import json, os
+alias = {"ip": os.environ["ROUTER_IP"], "hostnames": [os.environ["QUAY_HOST"]]}
+print(json.dumps({"spec": {
+    "central": {"hostAliases": [alias]},
+    "scannerV4": {
+        "indexer": {"hostAliases": [alias]},
+        "matcher": {"hostAliases": [alias]},
+    },
+}}))
+')"
+  echo "Mapping ${quay_host} to router ${router_ip}"
+  oc -n "${ns}" patch central "${central_cr}" --type=merge -p "${patch}"
+  for deploy in central scanner-v4-indexer scanner-v4-matcher; do
+    if oc -n "${ns}" get "deploy/${deploy}" >/dev/null 2>&1; then
+      oc -n "${ns}" rollout status "deploy/${deploy}" --timeout=300s
+    fi
+  done
+}
+
 do_cli_vars() {
   load_roadshow_env
+  # Reencrypt Central routes do not offer ALPN; roxctl from grpc-go >= 1.67 fails without this.
+  persist_var GRPC_ENFORCE_ALPN_ENABLED false
   resolve_rox_central_address || return 1
   persist_var ROX_CENTRAL_ADDRESS "${ROX_CENTRAL_ADDRESS}"
   persist_var RHACS_NAMESPACE "${RHACS_NAMESPACE}"
@@ -429,6 +788,28 @@ detect_quay_url() {
   return 1
 }
 
+# Track 2 runs mvn on the bastion. The launcher is a shell script plus a Maven
+# home, so it cannot be copied out of an image as a single ELF binary.
+ensure_maven() {
+  if command -v mvn >/dev/null 2>&1; then
+    echo "mvn already on PATH ($(command -v mvn))"
+    mvn -version || true
+    return 0
+  fi
+  echo "mvn not found; attempting install..."
+  if command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y maven
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y maven
+  else
+    echo "Error: mvn is required but could not be installed (no dnf/yum)." >&2
+    return 1
+  fi
+  hash -r 2>/dev/null || true
+  command -v mvn >/dev/null 2>&1
+  mvn -version
+}
+
 # Labs expect podman; install it when missing (common on minimal bastions).
 ensure_podman() {
   if command -v podman >/dev/null 2>&1; then
@@ -482,8 +863,6 @@ initialize_quay_admin() {
     -H "Content-Type: application/json" \
     -d "${body}" || true)"
   echo "Quay initialize HTTP ${code}"
-  cat /tmp/quay-init.json 2>/dev/null || true
-  echo
   case "${code}" in
     200|201) echo "Quay admin user created" ;;
     400|409) echo "Quay admin user already exists" ;;
@@ -494,6 +873,47 @@ initialize_quay_admin() {
 podman_login_quay() {
   local url="$1" user="$2" password="$3"
   podman login --tls-verify=false "${url}" -u "${user}" -p "${password}"
+}
+
+# Hash with the bcrypt library inside the Quay image so the prefix is $2b$,
+# which is what Quay stores in public.user.password_hash.
+quay_bcrypt_hash() {
+  local ns=$1 password=$2 py hash
+  py="$(oc -n "${ns}" exec deploy/registry-quay-app -c quay-app -- \
+    sh -c 'command -v /quay-registry/venv/bin/python || command -v python3 || command -v python' \
+    2>/dev/null | tr -d '\r' || true)"
+  if [[ -n "${py}" ]]; then
+    hash="$(oc -n "${ns}" exec deploy/registry-quay-app -c quay-app -- \
+      env QUAY_PASSWORD="${password}" "${py}" -c \
+      'import bcrypt,os; print(bcrypt.hashpw(os.environ["QUAY_PASSWORD"].encode(), bcrypt.gensalt(12)).decode())' \
+      2>/dev/null | tr -d '\r' | grep '^\$2' | tail -1 || true)"
+  fi
+  if [[ -z "${hash}" ]] && command -v htpasswd >/dev/null 2>&1; then
+    hash="$(htpasswd -bnBC 12 x "${password}" | cut -d: -f2 | sed 's/^\$2y\$/\$2b\$/')"
+  fi
+  [[ -n "${hash}" ]] || return 1
+  printf '%s' "${hash}"
+}
+
+# /api/v1/user/initialize only succeeds once. Later runs must overwrite that
+# password so the account matches QUAY_PASSWORD in ~/.bashrc.
+reset_quay_admin_password() {
+  local user="$1" password="$2"
+  local hash out
+  hash="$(quay_bcrypt_hash quay "${password}")" || {
+    echo "Error: could not generate a bcrypt hash for the Quay admin password." >&2
+    return 1
+  }
+  echo "Setting Quay user '${user}' to the password passed to this script..."
+  out="$(oc -n quay exec deploy/registry-quay-database -- env HASH="${hash}" QUAY_USER_NAME="${user}" \
+    sh -c 'u=${POSTGRESQL_USER:-${POSTGRES_USER:-quay}}; d=${POSTGRESQL_DATABASE:-${POSTGRES_DB:-quay}}; export PGPASSWORD=${POSTGRESQL_PASSWORD:-$POSTGRES_PASSWORD}; psql -U "$u" -d "$d" -c "UPDATE public.\"user\" SET password_hash = '\''${HASH}'\'' WHERE username = '\''${QUAY_USER_NAME}'\'';"')" \
+    || return 1
+  if [[ "${out}" != *"UPDATE 1"* ]]; then
+    echo "Error: Quay did not update a password row for user '${user}'." >&2
+    printf '%s\n' "${out}" | grep -v '\$2' >&2 || true
+    return 1
+  fi
+  echo "Quay admin password updated."
 }
 
 do_quay_login() {
@@ -508,30 +928,64 @@ do_quay_login() {
   wait_for_quay "${QUAY_URL}" || return 1
   initialize_quay_admin "${QUAY_URL}" "${QUAY_USER}" "${QUAY_PASSWORD}"
   if podman_login_quay "${QUAY_URL}" "${QUAY_USER}" "${QUAY_PASSWORD}"; then
+    persist_var QUAY_PASSWORD "${QUAY_PASSWORD}"
+    ensure_quay_account_token
     return 0
   fi
-  local cluster_pass=""
-  cluster_pass="$(oc -n quay get secret quay-admin-password -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)"
-  if [[ -n "${cluster_pass}" && "${cluster_pass}" != "${QUAY_PASSWORD}" ]]; then
-    echo "Login failed with the Showroom password; trying secret/quay-admin-password..."
-    initialize_quay_admin "${QUAY_URL}" "${QUAY_USER}" "${cluster_pass}"
-    if podman_login_quay "${QUAY_URL}" "${QUAY_USER}" "${cluster_pass}"; then
-      persist_var QUAY_PASSWORD "${cluster_pass}"
+  echo "Login with the supplied password failed. The admin account already exists with a different password."
+  reset_quay_admin_password "${QUAY_USER}" "${QUAY_PASSWORD}" || return 1
+  if podman_login_quay "${QUAY_URL}" "${QUAY_USER}" "${QUAY_PASSWORD}"; then
+    persist_var QUAY_PASSWORD "${QUAY_PASSWORD}"
+    ensure_quay_account_token
+    return 0
+  fi
+  echo "Error: podman login to ${QUAY_URL} failed for user '${QUAY_USER}' after resetting the password." >&2
+  return 1
+}
+
+# Blob upload sometimes returns HTTP 500 while MinIO or Quay is still settling.
+# Retry that status only. Auth and other errors stop immediately.
+podman_push_retry() {
+  local image="$1"
+  shift
+  local attempt=1 max=3 rc=0 log ns
+  while (( attempt <= max )); do
+    log="$(mktemp)"
+    if podman push "$@" "${image}" >"${log}" 2>&1; then
+      cat "${log}"
+      rm -f "${log}"
       return 0
     fi
-  fi
-  echo "Error: podman login to ${QUAY_URL} failed for user '${QUAY_USER}'." >&2
-  echo "Create the first user (once) with:" >&2
-  echo "  curl -sk -X POST 'https://${QUAY_URL}/api/v1/user/initialize' -H 'Content-Type: application/json' \\" >&2
-  echo "    -d '{\"username\":\"${QUAY_USER}\",\"password\":\"<password>\",\"email\":\"${QUAY_USER}@example.com\",\"access_token\":true}'" >&2
-  return 1
+    rc=$?
+    cat "${log}"
+    if (( attempt == max )) || ! grep -q 'HTTP status: 500' "${log}"; then
+      if grep -q 'HTTP status: 500' "${log}"; then
+        echo "Quay storage errors from the last 2 minutes:"
+        oc -n quay logs deploy/registry-quay-app -c quay-app --since=2m 2>/dev/null \
+          | grep -Ei 'storage|s3|bucket|boto|ClientError|NoSuch|exception' \
+          | grep -viE 'secret_key|access_key|password' \
+          | tail -20 || true
+      fi
+      rm -f "${log}"
+      return "${rc}"
+    fi
+    rm -f "${log}"
+    echo "Push of ${image} returned HTTP 500 (attempt ${attempt}/${max}). Retrying in 15s..."
+    ns="$(quay_namespace 2>/dev/null || true)"
+    if [[ -n "${ns}" ]]; then
+      repair_quay_storage "${ns}" || true
+    fi
+    sleep 15
+    attempt=$((attempt + 1))
+  done
+  return "${rc}"
 }
 
 do_golden_image() {
   ensure_podman || return 1
   podman pull "${PYTHON_ALPINE_BASE}"
   podman tag "${PYTHON_ALPINE_BASE}" "${QUAY_URL}/${QUAY_USER}/python-alpine-golden:0.1"
-  podman push "${QUAY_URL}/${QUAY_USER}/python-alpine-golden:0.1"
+  podman_push_retry "${QUAY_URL}/${QUAY_USER}/python-alpine-golden:0.1"
 }
 
 do_frontend_image() {
@@ -545,12 +999,780 @@ do_frontend_image() {
     "${TUTORIAL_HOME}/app-images/frontend/Dockerfile"
   cd "${TUTORIAL_HOME}/app-images/frontend/"
   podman build -t "${QUAY_URL}/${QUAY_USER}/frontend:0.1" .
-  podman push "${QUAY_URL}/${QUAY_USER}/frontend:0.1" --remove-signatures
+  podman_push_retry "${QUAY_URL}/${QUAY_USER}/frontend:0.1" --remove-signatures
+}
+
+# True when a MinIO workload is still on an image other than the public mirror.
+# Covers ImagePullBackOff of quay.io/minio/minio and a running-but-unready
+# replacement such as pgsty/minio.
+minio_needs_public_image() {
+  local ns=$1
+  local count
+  count="$(oc -n "${ns}" get deploy,sts -o json | jq --arg replacement "${MINIO_REPLACEMENT_IMAGE}" '
+    [ .items[]?
+      | ((.spec.template.spec.containers // []) + (.spec.template.spec.initContainers // []))[]
+      | select(.name == "minio" or ((.image // "") | test("minio/minio|pgsty/minio|/minio:")))
+      | select(.image != $replacement)
+    ] | length
+  ')"
+  [[ "${count}" -gt 0 ]]
+}
+
+# Namespace that holds the roadshow Quay install.
+quay_namespace() {
+  local ns
+  for ns in quay quay-enterprise; do
+    if oc get namespace "${ns}" >/dev/null 2>&1; then
+      printf '%s\n' "${ns}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Point MinIO workloads that are not already on the public mirror at that image.
+# Returns 0 when at least one workload was updated and became ready.
+repoint_minio_image() {
+  local ns=$1
+  local kind name container image kind_lc workload
+  local -a workloads=()
+  local seen=" "
+
+  while IFS=$'\t' read -r kind name container image; do
+    [[ -z "${kind}" ]] && continue
+    echo "Quay MinIO is not using a pullable image (${image})"
+    echo "Using public image ${MINIO_REPLACEMENT_IMAGE} for ${kind}/${name} container ${container}"
+    kind_lc="$(printf '%s' "${kind}" | tr '[:upper:]' '[:lower:]')"
+    oc -n "${ns}" set image "${kind_lc}/${name}" "${container}=${MINIO_REPLACEMENT_IMAGE}" || return 1
+    workloads+=("${kind_lc}/${name}")
+  done < <(oc -n "${ns}" get deploy,sts -o json | jq -r --arg replacement "${MINIO_REPLACEMENT_IMAGE}" '
+    .items[]?
+    | .kind as $kind
+    | .metadata.name as $name
+    | ((.spec.template.spec.containers // []) + (.spec.template.spec.initContainers // []))[]
+    | select(.name == "minio" or ((.image // "") | test("minio/minio|pgsty/minio|/minio:")))
+    | select(.image != $replacement)
+    | [$kind, $name, .name, .image] | @tsv
+  ')
+
+  if [[ "${#workloads[@]}" -eq 0 ]]; then
+    echo "Error: Quay MinIO is down but no Deployment or StatefulSet container could be retargeted." >&2
+    oc -n "${ns}" get pods -o wide >&2 || true
+    oc -n "${ns}" logs deploy/minio --tail=40 >&2 || true
+    oc -n "${ns}" get events --sort-by='.lastTimestamp' >&2 | tail -n 20 || true
+    return 1
+  fi
+
+  for workload in "${workloads[@]}"; do
+    [[ "${seen}" == *" ${workload} "* ]] && continue
+    seen+="${workload} "
+    oc -n "${ns}" rollout restart "${workload}" >/dev/null || return 1
+    if ! oc -n "${ns}" rollout status "${workload}" --timeout=300s; then
+      echo "Error: ${workload} did not become ready with ${MINIO_REPLACEMENT_IMAGE}" >&2
+      oc -n "${ns}" get pods -o wide >&2 || true
+      oc -n "${ns}" logs "${workload}" --tail=40 >&2 || true
+      oc -n "${ns}" get events --sort-by='.lastTimestamp' >&2 | tail -n 20 || true
+      return 1
+    fi
+  done
+}
+
+# Same ready signal as wait_for_quay: registry /v2/ returns 200 or 401.
+quay_v2_ready() {
+  local host code
+  host="$(detect_quay_url 2>/dev/null || true)"
+  [[ -n "${host}" ]] || return 1
+  code="$(curl -sk -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 "https://${host}/v2/" || true)"
+  [[ "${code}" == "401" || "${code}" == "200" ]]
+}
+
+# Read a MinIO credential from the deployment env, including secretKeyRef and envFrom.
+minio_credential() {
+  local ns=$1 key=$2
+  oc -n "${ns}" get deploy minio -o json | python3 -c '
+import json, subprocess, sys
+ns, key = sys.argv[1], sys.argv[2]
+deploy = json.load(sys.stdin)
+containers = deploy["spec"]["template"]["spec"].get("containers") or []
+container = next((c for c in containers if c.get("name") == "minio"), containers[0] if containers else {})
+for env in container.get("env") or []:
+    if env.get("name") != key:
+        continue
+    if env.get("value"):
+        print(env["value"].strip())
+        sys.exit(0)
+    ref = (env.get("valueFrom") or {}).get("secretKeyRef") or {}
+    if ref.get("name") and ref.get("key"):
+        raw = subprocess.check_output([
+            "oc", "-n", ns, "get", "secret", ref["name"],
+            "-o", "jsonpath={.data." + ref["key"] + "}",
+        ])
+        print(subprocess.check_output(["base64", "-d"], input=raw).decode().strip())
+        sys.exit(0)
+for src in container.get("envFrom") or []:
+    name = (src.get("secretRef") or {}).get("name")
+    if not name:
+        continue
+    data = json.loads(subprocess.check_output([
+        "oc", "-n", ns, "get", "secret", name, "-o", "json",
+    ])).get("data") or {}
+    if key in data:
+        print(subprocess.check_output(["base64", "-d"], input=data[key].encode()).decode().strip())
+        sys.exit(0)
+sys.exit(1)
+' "${ns}" "${key}"
+}
+
+# The thanos MinIO image has no mc client. Create bucket quay with the boto3
+# library already in the Quay image, using path-style SigV4.
+ensure_minio_bucket() {
+  local ns=$1 user=$2 pass=$3 host=$4 port=$5
+  local py endpoint
+  echo "Ensuring MinIO bucket quay"
+  if oc -n "${ns}" exec deploy/minio -- sh -c 'command -v mc >/dev/null 2>&1'; then
+    oc -n "${ns}" exec deploy/minio -- env \
+      MINIO_USER="${user}" MINIO_PASS="${pass}" MINIO_PORT="${port}" \
+      sh -c 'mc alias set local "http://127.0.0.1:${MINIO_PORT}" "$MINIO_USER" "$MINIO_PASS" >/dev/null && mc mb --ignore-existing local/quay'
+    return
+  fi
+  if ! oc -n "${ns}" get deploy registry-quay-app >/dev/null 2>&1; then
+    echo "Warning: Quay is not up yet, so bucket quay will be created after the registry starts."
+    return 0
+  fi
+  py="$(oc -n "${ns}" exec deploy/registry-quay-app -c quay-app -- \
+    sh -c 'command -v /quay-registry/venv/bin/python || command -v python3 || command -v python' \
+    2>/dev/null | tr -d '\r' || true)"
+  if [[ -z "${py}" ]]; then
+    echo "Error: cannot create MinIO bucket quay (no mc client, and Quay has no Python)." >&2
+    return 1
+  fi
+  endpoint="http://${host}:${port}"
+  oc -n "${ns}" exec deploy/registry-quay-app -c quay-app -- \
+    env MINIO_USER="${user}" MINIO_PASS="${pass}" MINIO_ENDPOINT="${endpoint}" "${py}" -c '
+import os
+import boto3
+from botocore.client import Config
+from botocore.exceptions import ClientError
+s3 = boto3.client(
+    "s3",
+    endpoint_url=os.environ["MINIO_ENDPOINT"],
+    aws_access_key_id=os.environ["MINIO_USER"],
+    aws_secret_access_key=os.environ["MINIO_PASS"],
+    region_name="us-east-1",
+    config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+)
+try:
+    s3.head_bucket(Bucket="quay")
+    print("MinIO bucket quay exists")
+except ClientError as exc:
+    code = str(exc.response.get("Error", {}).get("Code", ""))
+    if code not in ("404", "NoSuchBucket", "NotFound"):
+        raise
+    s3.create_bucket(Bucket="quay")
+    print("Created MinIO bucket quay")
+'
+}
+
+# Quay's config tool defaults signature_version to s3v2, which botocore rejects,
+# and a missing region makes the signed MinIO call fail. Either one becomes
+# HTTP 500 on blob upload. Omitting DISTRIBUTED_STORAGE_PREFERENCE leaves
+# Quay's built-in default of local_us, which is KeyError on blob upload when
+# the only configured location is named default. The registry process only
+# reads config.yaml at start.
+quay_loaded_storage_config() {
+  local ns=$1 py
+  py="$(oc -n "${ns}" exec deploy/registry-quay-app -c quay-app -- \
+    sh -c 'command -v /quay-registry/venv/bin/python || command -v python3 || command -v python' \
+    2>/dev/null | tr -d '\r' || true)"
+  [[ -n "${py}" ]] || return 1
+  oc -n "${ns}" exec deploy/registry-quay-app -c quay-app -- "${py}" -c '
+import pathlib, sys
+paths = [pathlib.Path("/conf/stack/config.yaml"), pathlib.Path("/quay-registry/conf/stack/config.yaml")]
+text = ""
+for path in paths:
+    if path.is_file():
+        data = path.read_text(errors="ignore")
+        if "DISTRIBUTED_STORAGE_CONFIG" in data:
+            text = data
+            break
+ids = []
+prefs = []
+in_cfg = False
+in_pref = False
+for line in text.splitlines():
+    if line.startswith("DISTRIBUTED_STORAGE_PREFERENCE:"):
+        inline = line.split(":", 1)[1].strip()
+        if inline.startswith("[") and inline.endswith("]") and inline[1:-1].strip():
+            prefs.extend([part.strip() for part in inline[1:-1].split(",") if part.strip()])
+        elif inline:
+            prefs.append(inline)
+        in_pref = True
+        in_cfg = False
+        continue
+    if line.startswith("DISTRIBUTED_STORAGE_CONFIG:"):
+        in_cfg = True
+        in_pref = False
+        continue
+    if in_pref:
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            prefs.append(stripped[2:].strip())
+            continue
+        if line.strip() == "":
+            continue
+        in_pref = False
+    if in_cfg:
+        if line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":"):
+            ids.append(line.strip()[:-1])
+        elif line and not line.startswith(" "):
+            in_cfg = False
+preference_ok = bool(ids) and bool(prefs) and prefs[0] in ids
+short_host = any(
+    line.strip().startswith("hostname:")
+    and line.strip().endswith(".svc")
+    and ".cluster.local" not in line
+    for line in text.splitlines()
+)
+proxy_ok = "FEATURE_PROXY_STORAGE: true" in text
+sys.exit(0 if ("signature_version: s3v4" in text and "region_name:" in text and preference_ok and proxy_ok and not short_host) else 1)
+'
+}
+
+restart_quay_app() {
+  local ns=$1 host
+  echo "Restarting Quay so it reloads the MinIO storage config."
+  oc -n "${ns}" rollout restart deploy/registry-quay-app >/dev/null
+  oc -n "${ns}" rollout status deploy/registry-quay-app --timeout=300s || return 1
+  host="$(detect_quay_url 2>/dev/null || true)"
+  if [[ -n "${host}" ]]; then
+    wait_for_quay "${host}" || return 1
+  fi
+}
+
+ensure_quay_storage_signature() {
+  local ns=$1
+  local cfg updated
+  if ! oc -n "${ns}" get secret quay-config-bundle >/dev/null 2>&1; then
+    return 0
+  fi
+  cfg="$(mktemp)"
+  updated="$(mktemp)"
+  oc -n "${ns}" get secret quay-config-bundle -o jsonpath='{.data.config\.yaml}' | base64 -d > "${cfg}"
+  py_rc=0
+  python3 - "${cfg}" "${updated}" <<'PY' || py_rc=$?
+import pathlib, sys
+src, dst = sys.argv[1], sys.argv[2]
+rows = pathlib.Path(src).read_text().splitlines()
+
+def storage_ids(lines):
+    ids = []
+    in_cfg = False
+    for raw in lines:
+        if raw.startswith("DISTRIBUTED_STORAGE_CONFIG:"):
+            in_cfg = True
+            continue
+        if not in_cfg:
+            continue
+        if raw.startswith("  ") and not raw.startswith("   ") and raw.rstrip().endswith(":"):
+            ids.append(raw.strip()[:-1])
+            continue
+        if raw and not raw.startswith(" "):
+            in_cfg = False
+    return ids
+
+ids = storage_ids(rows)
+has_sig = any(line.strip().startswith("signature_version:") for line in rows)
+has_region = any(line.strip().startswith("region_name:") for line in rows)
+out = []
+i = 0
+while i < len(rows):
+    line = rows[i]
+    if line.startswith("DISTRIBUTED_STORAGE_PREFERENCE:"):
+        i += 1
+        while i < len(rows) and (rows[i].strip() == "" or rows[i].strip().startswith("- ")):
+            i += 1
+        continue
+    if line.strip().startswith("signature_version:"):
+        indent = line[:len(line) - len(line.lstrip())]
+        out.append(f"{indent}signature_version: s3v4")
+        i += 1
+        continue
+    out.append(line)
+    if not has_sig and line.strip().startswith("storage_path:"):
+        indent = line[:len(line) - len(line.lstrip())]
+        out.append(f"{indent}signature_version: s3v4")
+        has_sig = True
+    i += 1
+if has_sig and not has_region:
+    out.append("      region_name: us-east-1")
+    has_region = True
+if not has_sig or not has_region or not ids:
+    sys.exit(2)
+inserted = []
+placed = False
+for line in out:
+    if not placed and line.startswith("DISTRIBUTED_STORAGE_CONFIG:"):
+        inserted.append("DISTRIBUTED_STORAGE_PREFERENCE:")
+        inserted.append(f"  - {ids[0]}")
+        placed = True
+    inserted.append(line)
+if not placed:
+    sys.exit(2)
+final = []
+saw_proxy = False
+for line in inserted:
+    stripped = line.strip()
+    if stripped.startswith("FEATURE_PROXY_STORAGE:"):
+        final.append("FEATURE_PROXY_STORAGE: true")
+        saw_proxy = True
+        continue
+    if stripped.startswith("hostname:") and stripped.endswith(".svc") and ".cluster.local" not in stripped:
+        indent = line[:len(line) - len(line.lstrip())]
+        final.append(f"{indent}{stripped}.cluster.local")
+        continue
+    final.append(line)
+if not saw_proxy:
+    final.insert(0, "FEATURE_PROXY_STORAGE: true")
+pathlib.Path(dst).write_text("\n".join(final) + "\n")
+PY
+  if [[ "${py_rc}" -ne 0 ]]; then
+    echo "Error: Quay config.yaml has no usable DISTRIBUTED_STORAGE_CONFIG entry." >&2
+    rm -f "${cfg}" "${updated}"
+    return 1
+  fi
+  if ! cmp -s "${cfg}" "${updated}"; then
+    oc -n "${ns}" create secret generic quay-config-bundle \
+      --from-file=config.yaml="${updated}" \
+      --dry-run=client -o yaml | oc apply -f - >/dev/null
+    echo "Updated Quay storage: proxy blobs through Quay, s3v4 signature, and a resolvable MinIO hostname."
+    nudge_quayregistry "${ns}"
+  fi
+  rm -f "${cfg}" "${updated}"
+
+  if ! oc -n "${ns}" get deploy registry-quay-app >/dev/null 2>&1; then
+    return 0
+  fi
+  # A secret volume update does not reload the running Quay process.
+  local config_rv restarted
+  config_rv="$(oc -n "${ns}" get secret quay-config-bundle -o jsonpath='{.metadata.resourceVersion}')"
+  restarted="$(oc -n "${ns}" get deploy registry-quay-app -o jsonpath='{.metadata.annotations.roadshow/storage-config-restarted}' 2>/dev/null || true)"
+  if [[ "${restarted}" != "${config_rv}" ]] || ! quay_loaded_storage_config "${ns}"; then
+    restart_quay_app "${ns}" || return 1
+    oc -n "${ns}" annotate deploy/registry-quay-app \
+      "roadshow/storage-config-restarted=${config_rv}" --overwrite >/dev/null || true
+  fi
+  # The operator copies the bundle into the pod secret on its own rollout.
+  # Wait until that file names the configured location, or blob upload 500s.
+  local attempt
+  for attempt in 1 2 3 4 5 6; do
+    if quay_loaded_storage_config "${ns}"; then
+      return 0
+    fi
+    sleep 10
+  done
+  echo "Quay did not load region_name from config.yaml. Setting AWS_DEFAULT_REGION on the registry."
+  oc -n "${ns}" set env deploy/registry-quay-app -c quay-app \
+    AWS_DEFAULT_REGION=us-east-1 AWS_REGION=us-east-1 >/dev/null
+  oc -n "${ns}" rollout status deploy/registry-quay-app --timeout=300s || return 1
+  local host
+  host="$(detect_quay_url 2>/dev/null || true)"
+  if [[ -n "${host}" ]]; then
+    wait_for_quay "${host}" || return 1
+  fi
+  if quay_loaded_storage_config "${ns}"; then
+    return 0
+  fi
+  echo "Error: Quay did not load a storage preference that matches DISTRIBUTED_STORAGE_CONFIG." >&2
+  return 1
+}
+
+# Blob upload returns HTTP 500 when bucket quay is missing, MinIO rejects
+# the request signature, or DISTRIBUTED_STORAGE_PREFERENCE still says local_us.
+# Repair all three even if /v2/ is already answering.
+repair_quay_storage() {
+  local ns=$1 user pass
+  user="$(minio_credential "${ns}" MINIO_ROOT_USER 2>/dev/null || minio_credential "${ns}" MINIO_ACCESS_KEY 2>/dev/null || true)"
+  pass="$(minio_credential "${ns}" MINIO_ROOT_PASSWORD 2>/dev/null || minio_credential "${ns}" MINIO_SECRET_KEY 2>/dev/null || true)"
+  if [[ -z "${user}" || -z "${pass}" ]]; then
+    echo "Error: could not read MinIO credentials from deployment/minio in ${ns}." >&2
+    return 1
+  fi
+  local port host
+  port="$(oc -n "${ns}" get svc minio -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || true)"
+  port="${port:-9000}"
+  # Short name minio.<ns>.svc is not a CoreDNS record. Image pulls query it
+  # as an absolute name and fail with "no such host".
+  host="minio.${ns}.svc.cluster.local"
+  ensure_minio_bucket "${ns}" "${user}" "${pass}" "${host}" "${port}" || return 1
+  ensure_quay_storage_signature "${ns}" || return 1
+}
+
+# QuayRegistry "registry" publishes route registry-quay, which the lab expects.
+ensure_quay_registry() {
+  local ns=$1
+  if oc -n "${ns}" get quayregistry registry >/dev/null 2>&1; then
+    echo "QuayRegistry ${ns}/registry already exists."
+    return 0
+  fi
+  local existing
+  existing="$(oc -n "${ns}" get quayregistry --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+  if [[ "${existing}" != "0" ]]; then
+    echo "QuayRegistry objects already exist in ${ns}; not creating another."
+    return 0
+  fi
+
+  echo "No QuayRegistry in ${ns}. Creating registry so the operator publishes a route."
+  local user pass svc port host
+  user="$(minio_credential "${ns}" MINIO_ROOT_USER 2>/dev/null || minio_credential "${ns}" MINIO_ACCESS_KEY 2>/dev/null || true)"
+  pass="$(minio_credential "${ns}" MINIO_ROOT_PASSWORD 2>/dev/null || minio_credential "${ns}" MINIO_SECRET_KEY 2>/dev/null || true)"
+  if [[ -z "${user}" || -z "${pass}" ]]; then
+    echo "Error: could not read MinIO credentials from deployment/minio in ${ns}." >&2
+    return 1
+  fi
+
+  if ! oc -n "${ns}" get svc minio >/dev/null 2>&1; then
+    echo "Creating Service ${ns}/minio"
+    oc -n "${ns}" expose deploy/minio --name=minio --port=9000 --target-port=9000 >/dev/null
+  fi
+  svc="minio"
+  port="$(oc -n "${ns}" get svc "${svc}" -o jsonpath='{.spec.ports[0].port}')"
+  port="${port:-9000}"
+  host="${svc}.${ns}.svc.cluster.local"
+
+  ensure_minio_bucket "${ns}" "${user}" "${pass}" "${host}" "${port}" || return 1
+
+  local cfg
+  cfg="$(mktemp)"
+  MINIO_USER="${user}" MINIO_PASS="${pass}" MINIO_HOST="${host}" MINIO_PORT="${port}" python3 -c '
+import json, os
+user = json.dumps(os.environ["MINIO_USER"])
+password = json.dumps(os.environ["MINIO_PASS"])
+host = json.dumps(os.environ["MINIO_HOST"])
+port = os.environ["MINIO_PORT"]
+print(f"""ALLOW_PULLS_WITHOUT_STRICT_LOGGING: false
+AUTHENTICATION_TYPE: Database
+DEFAULT_TAG_EXPIRATION: 2w
+ENTERPRISE_LOGO_URL: /static/img/RH_Logo_Quay_Black_UX-horizontal_white.png
+FEATURE_BUILD_SUPPORT: false
+FEATURE_DIRECT_LOGIN: true
+FEATURE_MAILING: false
+FEATURE_USER_INITIALIZE: true
+FEATURE_PROXY_STORAGE: true
+REGISTRY_TITLE: Red Hat Quay
+REGISTRY_TITLE_SHORT: Red Hat Quay
+SETUP_COMPLETE: true
+TAG_EXPIRATION_OPTIONS:
+  - 2w
+TEAM_RESYNC_STALE_TIME: 60m
+TESTING: false
+DISTRIBUTED_STORAGE_PREFERENCE:
+  - default
+DISTRIBUTED_STORAGE_CONFIG:
+  default:
+    - RadosGWStorage
+    - access_key: {user}
+      secret_key: {password}
+      bucket_name: quay
+      hostname: {host}
+      is_secure: false
+      port: {port}
+      storage_path: /datastorage/registry
+      signature_version: s3v4
+      region_name: us-east-1
+""")
+' > "${cfg}"
+  oc -n "${ns}" create secret generic quay-config-bundle \
+    --from-file=config.yaml="${cfg}" \
+    --dry-run=client -o yaml | oc apply -f - >/dev/null
+  rm -f "${cfg}"
+
+  oc -n "${ns}" apply -f - <<EOF
+apiVersion: quay.redhat.com/v1
+kind: QuayRegistry
+metadata:
+  name: registry
+spec:
+  configBundleSecret: quay-config-bundle
+  components:
+    - kind: objectstorage
+      managed: false
+EOF
+  echo "Created QuayRegistry ${ns}/registry (route will be registry-quay)."
+}
+
+# Ask the Quay operator to reconcile again now that MinIO can start.
+nudge_quayregistry() {
+  local ns=$1 name
+  local found=false
+  while read -r name; do
+    [[ -z "${name}" ]] && continue
+    found=true
+    echo "Requesting reconcile of QuayRegistry ${ns}/${name}"
+    oc -n "${ns}" annotate "quayregistry/${name}" \
+      "quay-operator.redhat.com/objectstorage-retry=$(date +%s)" --overwrite >/dev/null
+  done < <(oc -n "${ns}" get quayregistry -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+  if [[ "${found}" == false ]]; then
+    echo "No QuayRegistry in namespace ${ns}. The operator will not create a route until that object exists."
+  fi
+}
+
+show_quay_status() {
+  local ns=$1
+  echo "Quay workloads in ${ns}:"
+  oc -n "${ns}" get pods,route --no-headers 2>/dev/null || true
+  oc -n "${ns}" get quayregistry -o json 2>/dev/null | jq -r '
+    .items[]? | "QuayRegistry \(.metadata.name):",
+    (.status.conditions[]? | "  \(.type)=\(.status) \(.reason // "") \(.message // "")")
+  ' || true
+}
+
+# quay.io/minio/mc rejects anonymous pulls. The bucket Job used to run that
+# client, which left an ImagePullBackOff hook that blocks the Quay Argo sync.
+# Bucket creation is the OpenShift CLI Job plus ensure_minio_bucket, so these
+# Jobs are safe to delete. Deleting the Job also deletes its pods.
+remove_unpullable_minio_mc_jobs() {
+  local ns=$1 name
+  while read -r name; do
+    [[ -z "${name}" ]] && continue
+    echo "Deleting Job ${ns}/${name}: quay.io/minio/mc rejects anonymous pulls."
+    oc -n "${ns}" delete job "${name}" --wait=false || return 1
+  done < <(oc -n "${ns}" get jobs -o json | jq -r '
+    .items[]?
+    | select(any(
+        ((.spec.template.spec.containers // []) + (.spec.template.spec.initContainers // []))[];
+        (.image // "") | test("minio/mc")
+      ))
+    | .metadata.name
+  ')
+}
+
+# Repair Quay object storage before the rest of the lab. A healthy registry
+# is left alone. A MinIO pod that cannot pull, or is not already on the
+# public mirror, is switched to MINIO_REPLACEMENT_IMAGE.
+do_ensure_quay() {
+  local ns host repaired=false
+  ns="$(quay_namespace)" || {
+    echo "Error: Quay namespace not found (tried quay, quay-enterprise)." >&2
+    return 1
+  }
+  echo "Checking Quay in namespace ${ns}"
+  remove_unpullable_minio_mc_jobs "${ns}" || return 1
+
+  if quay_v2_ready; then
+    echo "Quay is up at $(detect_quay_url)."
+    repair_quay_storage "${ns}" || return 1
+    return 0
+  fi
+
+  if minio_needs_public_image "${ns}"; then
+    echo "Quay is down. MinIO will use ${MINIO_REPLACEMENT_IMAGE}"
+    repoint_minio_image "${ns}" || return 1
+    repaired=true
+  else
+    echo "Quay is not healthy yet. MinIO is already on ${MINIO_REPLACEMENT_IMAGE}."
+  fi
+
+  # The operator does not create a route until a QuayRegistry exists.
+  ensure_quay_registry "${ns}" || return 1
+  nudge_quayregistry "${ns}"
+  echo "Waiting for the Quay route..."
+  local deadline=$((SECONDS + 600))
+  local next_note=0
+  while (( SECONDS < deadline )); do
+    host="$(detect_quay_url 2>/dev/null || true)"
+    if [[ -n "${host}" ]]; then
+      wait_for_quay "${host}" || return 1
+      repair_quay_storage "${ns}" || return 1
+      echo "Quay is up at ${host}"
+      return 0
+    fi
+    if (( SECONDS >= next_note )); then
+      show_quay_status "${ns}"
+      next_note=$((SECONDS + 30))
+    fi
+    sleep 5
+  done
+
+  echo "Error: Quay route did not appear within 600s (namespace ${ns})." >&2
+  if [[ "${repaired}" == true ]]; then
+    echo "MinIO is running ${MINIO_REPLACEMENT_IMAGE}, but the registry route is still missing." >&2
+  fi
+  show_quay_status "${ns}" >&2 || true
+  oc -n "${ns}" logs deploy/minio --tail=40 >&2 || true
+  return 1
+}
+
+# progress_run sends this function's stdout to the log. Write step updates to
+# the terminal so a long VM start does not look frozen.
+acs_vm_status() {
+  local label="$1"
+  echo "${label}"
+  if [[ -w /dev/tty ]]; then
+    progress_render "${label}" >/dev/tty
+  fi
+}
+
+# Primary UDNs for the checkout and ledger demos. Namespaces are created
+# here, with the primary-user-defined-network label, so this does not
+# relabel demo-apps.
+do_user_defined_network() {
+  local net_manifest="${SCRIPT_DIR}/user-defined-network/network.yaml"
+  local workload_manifest="${SCRIPT_DIR}/user-defined-network/workloads.yaml"
+  local deadline name status missing
+  echo "Deploying checkout-service and ledger-service networks"
+  oc apply -f "${net_manifest}"
+  deadline=$((SECONDS + 180))
+  while true; do
+    missing=""
+    for name in checkout-service ledger-service; do
+      status="$(oc get clusteruserdefinednetwork "${name}" -o jsonpath='{range .status.conditions[?(@.type=="NetworkCreated")]}{.status}{end}' 2>/dev/null || true)"
+      if [[ "${status}" != "True" ]]; then
+        missing="${missing} ${name}=${status:-absent}"
+      fi
+    done
+    if [[ -z "${missing}" ]]; then
+      break
+    fi
+    if (( SECONDS >= deadline )); then
+      echo "Error: a ClusterUserDefinedNetwork did not report NetworkCreated within 180s:${missing}." >&2
+      oc get clusteruserdefinednetwork checkout-service ledger-service -o yaml >&2 || true
+      return 1
+    fi
+    sleep 3
+  done
+  oc apply -f "${workload_manifest}"
+  echo "ClusterUserDefinedNetwork checkout-service is ready on 192.168.210.0/24 (namespaces checkout-web, checkout-api)."
+  echo "ClusterUserDefinedNetwork ledger-service is ready on 192.168.211.0/24 (namespace ledger)."
+}
+
+# rhel-webserver is the second guest. GitOps keeps rhel9-vm in rhacs-virt.
+# The agent binary is still served by roxagent-bin in that namespace.
+# The guest joins checkout-service, the same primary UDN as checkout-web
+# and checkout-api. The primary label is only accepted when the namespace
+# is created, so a namespace still on the old webserver network is replaced.
+do_acs_vm() {
+  local ns=rhacs-virt-webserver
+  local vm=rhel-webserver
+  local deadline phase status machine binding udn_state part iface
+  acs_vm_status "Deploy rhel-webserver (namespace ${ns})"
+  if oc get ns "${ns}" >/dev/null 2>&1; then
+    udn_state="$(oc get ns "${ns}" -o json | jq -r 'if .metadata.labels["k8s.ovn.org/primary-user-defined-network"] == null then "missing" else "present" end')"
+    part="$(oc get ns "${ns}" -o json | jq -r '.metadata.labels["app.kubernetes.io/part-of"] // ""')"
+    if [[ "${udn_state}" == "missing" || "${part}" != "checkout-service" ]]; then
+      acs_vm_status "Deploy rhel-webserver (recreating ${ns} on checkout-service)"
+      oc delete ns "${ns}" --wait=true --timeout=180s
+    fi
+  fi
+  # webserver was a VM-only network. Drop it so this namespace is not
+  # selected by two primary networks.
+  if oc get clusteruserdefinednetwork webserver >/dev/null 2>&1; then
+    acs_vm_status "Deploy rhel-webserver (removing webserver network)"
+    oc delete clusteruserdefinednetwork webserver --wait=true --timeout=180s
+  fi
+  oc apply -f "${SCRIPT_DIR}/acs-vm/namespace.yaml"
+  deadline=$((SECONDS + 180))
+  while true; do
+    status="$(oc get clusteruserdefinednetwork checkout-service -o jsonpath='{range .status.conditions[?(@.type=="NetworkCreated")]}{.status}{" "}{.message}{end}' 2>/dev/null || true)"
+    if [[ "${status}" == True*"${ns}"* ]]; then
+      echo "Namespace ${ns} joined checkout-service (192.168.210.0/24) with checkout-web and checkout-api."
+      break
+    fi
+    if (( SECONDS >= deadline )); then
+      echo "Error: ${ns} did not join checkout-service within 180s (status=${status:-absent})." >&2
+      oc get clusteruserdefinednetwork checkout-service -o yaml >&2 || true
+      return 1
+    fi
+    acs_vm_status "Deploy rhel-webserver (waiting for checkout-service)"
+    sleep 3
+  done
+
+  if oc -n "${ns}" get "vm/${vm}" >/dev/null 2>&1; then
+    machine="$(oc -n "${ns}" get "vm/${vm}" -o jsonpath='{.spec.template.spec.domain.machine.type}' 2>/dev/null || true)"
+    secure="$(oc -n "${ns}" get "vm/${vm}" -o jsonpath='{.spec.template.spec.domain.firmware.bootloader.efi.secureBoot}' 2>/dev/null || true)"
+    binding="$(oc -n "${ns}" get "vm/${vm}" -o jsonpath='{.spec.template.spec.domain.devices.interfaces[0].binding.name}' 2>/dev/null || true)"
+    iface="$(oc -n "${ns}" get "vm/${vm}" -o jsonpath='{.spec.template.spec.domain.devices.interfaces[0].name}' 2>/dev/null || true)"
+    if [[ "${machine}" != "pc-q35-rhel9.6.0" || "${secure}" != "false" || "${binding}" != "l2bridge" || "${iface}" != "checkout-service" || "$(oc -n "${ns}" get "vm/${vm}" -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null || true)" != "" ]]; then
+      acs_vm_status "Deploy rhel-webserver (removing previous guest)"
+      oc -n "${ns}" delete "vm/${vm}" --wait=false --ignore-not-found || true
+      deadline=$((SECONDS + 120))
+      while oc -n "${ns}" get "vm/${vm}" >/dev/null 2>&1; do
+        if (( SECONDS >= deadline )); then
+          echo "Previous ${vm} did not finish deleting; clearing finalizers."
+          oc -n "${ns}" patch "vm/${vm}" --type=json -p '[{"op":"remove","path":"/metadata/finalizers"}]' >/dev/null 2>&1 || true
+          oc -n "${ns}" delete "vmi/${vm}" --wait=false --ignore-not-found >/dev/null 2>&1 || true
+          sleep 2
+          break
+        fi
+        acs_vm_status "Deploy rhel-webserver (previous guest is terminating)"
+        sleep 5
+      done
+    fi
+  fi
+
+  acs_vm_status "Deploy rhel-webserver (applying lab manifest)"
+  oc apply -f "${SCRIPT_DIR}/acs-vm/rhel-webserver-cloudinit-secret.yaml"
+  oc apply -f "${SCRIPT_DIR}/acs-vm/rhel-webserver-vm.yaml"
+  # Firmware is fixed at guest start. A VMI that booted with Secure Boot
+  # keeps kernel lockdown until it is replaced. Only restart when Secure Boot
+  # is explicitly on. An empty value is the new guest still writing its spec,
+  # and deleting that VMI is what virt-controller reports as CrashLoopBackOff.
+  if oc -n "${ns}" get "vmi/${vm}" >/dev/null 2>&1; then
+    secure="$(oc -n "${ns}" get "vmi/${vm}" -o jsonpath='{.spec.domain.firmware.bootloader.efi.secureBoot}' 2>/dev/null || true)"
+    binding="$(oc -n "${ns}" get "vmi/${vm}" -o jsonpath='{.spec.domain.devices.interfaces[0].binding.name}' 2>/dev/null || true)"
+    iface="$(oc -n "${ns}" get "vmi/${vm}" -o jsonpath='{.spec.domain.devices.interfaces[0].name}' 2>/dev/null || true)"
+    if [[ -n "${binding}" && "${binding}" != "l2bridge" ]] || [[ -n "${iface}" && "${iface}" != "checkout-service" ]]; then
+      acs_vm_status "Deploy rhel-webserver (restarting guest on checkout-service)"
+      oc -n "${ns}" delete "vmi/${vm}" --wait=false
+    elif [[ "${secure}" == "true" ]]; then
+      acs_vm_status "Deploy rhel-webserver (restarting guest without Secure Boot)"
+      oc -n "${ns}" delete "vmi/${vm}" --wait=false
+    fi
+  fi
+
+  deadline=$((SECONDS + 600))
+  while true; do
+    phase="$(oc -n "${ns}" get "vmi/${vm}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    status="$(oc -n "${ns}" get "vm/${vm}" -o jsonpath='{.status.printableStatus}' 2>/dev/null || true)"
+    if [[ "${phase}" == "Running" ]]; then
+      binding="$(oc -n "${ns}" get "vmi/${vm}" -o jsonpath='{.spec.domain.devices.interfaces[0].binding.name}' 2>/dev/null || true)"
+      iface="$(oc -n "${ns}" get "vmi/${vm}" -o jsonpath='{.spec.domain.devices.interfaces[0].name}' 2>/dev/null || true)"
+      if [[ "${binding}" == "l2bridge" && "${iface}" == "checkout-service" ]]; then
+        echo "${vm} is Running in ${ns} on checkout-service (192.168.210.0/24) with checkout-web and checkout-api. Cloud-init still registers the guest and starts roxagent."
+        return 0
+      fi
+    fi
+    case "${status}" in
+      Error|CrashLoop|CrashLoopBackOff|ErrImagePull|ImagePullBackOff|DataVolumeError)
+        echo "Error: ${vm} is ${status} (VMI phase=${phase:-absent})." >&2
+        oc -n "${ns}" describe "vm/${vm}" >&2 || true
+        oc -n "${ns}" describe "vmi/${vm}" >&2 || true
+        oc -n "${ns}" get events --sort-by='.lastTimestamp' >&2 || true
+        oc -n "${ns}" get pods -l "kubevirt.io/domain=${vm}" -o name 2>/dev/null | while read -r pod; do
+          echo "----- logs ${pod} -----" >&2
+          oc -n "${ns}" logs "${pod}" --all-containers --tail=60 >&2 || true
+          oc -n "${ns}" logs "${pod}" --all-containers --tail=60 --previous >&2 || true
+        done
+        return 1
+        ;;
+    esac
+    if (( SECONDS >= deadline )); then
+      echo "Error: ${vm} did not reach Running within 600s (vm=${status:-absent} vmi=${phase:-absent})." >&2
+      oc -n "${ns}" get vm,vmi,pod >&2 || true
+      oc -n "${ns}" describe "vm/${vm}" >&2 || true
+      return 1
+    fi
+    acs_vm_status "Deploy rhel-webserver (${status:-starting})"
+    sleep 5
+  done
 }
 
 progress_run "Verify OpenShift access" do_verify_admin
-progress_run "Install TSSC CLIs (cosign, oc-mirror, ec)" do_tssc_clis
-progress_run "Wait for RHACS Central" do_wait_central
+progress_run "Wait for Lightwell Java release" do_wait_lightwell_java
+progress_run "Deploy checkout and ledger networks" do_user_defined_network
+progress_run "Deploy rhel-webserver" do_acs_vm
+progress_run "Register ACS MCP with Lightspeed" lightspeed_ensure_acs_mcp
+progress_run "Read Quay credentials and account token" load_quay_env
+progress_run "Install TSSC CLIs (cosign, oc-mirror, ec, mvn)" do_tssc_clis
 
 # Kick off RHACS configure in the background so demo apps / Quay work can overlap.
 configure_pid=""
@@ -573,6 +1795,7 @@ fi
 
 progress_run "Configure RHACS CLI variables" do_cli_vars
 progress_run "Verify RHACS API access" do_verify_api
+progress_run "Enable shell completion" do_shell_completion
 
 # While optional RHACS configure runs in the background, clone demo-apps for image builds.
 if [[ "${SKIP_DEMO_APPS}" != true ]]; then
@@ -580,11 +1803,6 @@ if [[ "${SKIP_DEMO_APPS}" != true ]]; then
   if [[ "${SKIP_DEMO_APPLY}" != true ]]; then
     progress_run "Deploy workshop applications" do_apply_demo_apps
   fi
-fi
-
-if [[ "${SKIP_IMAGES}" != true ]]; then
-  progress_run "Log in to Quay" do_quay_login
-  progress_run "Build and push golden base image" do_golden_image
 fi
 
 if [[ -n "${configure_pid}" ]]; then
@@ -612,17 +1830,13 @@ if [[ -n "${configure_pid}" ]]; then
   load_roadshow_env
 fi
 
-if [[ "${SKIP_IMAGES}" != true ]]; then
-  progress_run "Build and push frontend image" do_frontend_image
-fi
-
 progress_done "Lab environment setup complete"
 load_roadshow_env
 
 progress_success_banner "Lab environment setup completed successfully" \
+  "Quay credentials read from the cluster" \
   "RHACS CLI ready (ROX_CENTRAL_ADDRESS / ROX_API_TOKEN saved)" \
-  "TSSC CLIs on PATH (cosign, oc-mirror, ec in ~/.local/bin)" \
-  "demo-apps cloned for image builds (cluster deploy is GitOps)" \
-  "Quay images ready (golden base + frontend, when image steps ran)" \
+  "TSSC CLIs on PATH (cosign, oc-mirror, ec in ~/.local/bin; mvn from the Maven RPM)" \
+  "Shell completion for oc, kubectl, and roxctl (source ~/.bashrc or open a new terminal)" \
   "Env file: ${ROADSHOW_ENV_FILE}" \
   "Detailed log: ${LOG_FILE}"

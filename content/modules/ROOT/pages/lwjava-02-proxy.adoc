@@ -1,0 +1,78 @@
+= 2. Lightwell repositories
+:toc:
+:toclevels: 1
+
+== Overview
+
+The vulnerable source already points Maven at the public Lightwell demo repositories. You clone that pin and read the order. You do not add credentials.
+
+== Why it matters
+
+A Lightwell rebuild is a new version in the remediated repository. Maven only selects it when two things are true: the repository is on the search path, and the pom asks for that version. This release asks for `6.0.3`, so the remediated build `6.0.3.rhlw-00001` is visible and unused.
+
+== Clone the pinned source
+
+. Clone `{java-demo-revision}` if you do not already have it
++
+[source,bash,subs="+attributes",role=execute]
+----
+if [[ ! -d "${HOME}/help-im-vulnerable/.git" ]]; then
+  git clone {java-demo-repo} "${HOME}/help-im-vulnerable"
+fi
+git -C "${HOME}/help-im-vulnerable" checkout {java-demo-revision}
+cd "${HOME}/help-im-vulnerable"
+git rev-parse HEAD
+----
++
+Expected output:
++
+----
+decfa713a0a705e4e388d359bd7eb16c51eaa946
+----
+
+== Read the repository order
+
+`.mvn/maven.config` forces every `mvn` command in this directory to use `.mvn/settings.xml`.
+
+. Show the search order
++
+[source,bash,role=execute]
+----
+cd "${HOME}/help-im-vulnerable"
+cat .mvn/maven.config
+grep -E 'id>|url>' .mvn/settings.xml
+----
++
+Expected output includes:
++
+----
+-s
+.mvn/settings.xml
+<id>lightwell-remediated</id>
+<url>https://packages.redhat.com/lightwell/public-lightwell-demo/java/remediated/</url>
+<id>lightwell-validated</id>
+<url>https://packages.redhat.com/lightwell/public-lightwell-demo/java/validated/</url>
+----
+
+Maven checks remediated, then validated, then Maven Central. No token is required for these public demo repositories.
+
+. Confirm the Woodstox rebuild is published
++
+[source,bash,subs="+attributes",role=execute]
+----
+curl -fsSL {java-demo-public-remediated-url}com/fasterxml/woodstox/woodstox-core/maven-metadata.xml \
+  | grep -E '<latest>|<release>'
+----
++
+Expected output:
++
+----
+<latest>6.0.3.rhlw-00001</latest>
+<release>6.0.3.rhlw-00001</release>
+----
+
+== Verify
+
+The clone is on `{java-demo-revision}`. `.mvn/settings.xml` lists `lightwell-remediated` before `lightwell-validated`. The remediated metadata lists `6.0.3.rhlw-00001`.
+
+Continue with xref:lwjava-03-pin.adoc[3. Pin the critical finding].

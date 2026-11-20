@@ -3,6 +3,7 @@
 :skills: Security Operating Model, RHACM PolicySet, NIST 800-53, DISA STIG
 :labid: LAB-301-01
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~25 minutes
@@ -50,56 +51,47 @@ Apply PolicySet `stride-ocp-baseline`, watch it NonCompliant while `inform` is o
 * Cluster-admin on the hub
 * xref:201-10-admission-governance.adoc[201-10] recommended (same `policies` namespace and ClusterSet binding)
 
-Click each step only if you need a hint.
+Click each step for the full solution.
+
+:lab-run-module: 301-01
+include::partial$lab-run.adoc[]
 
 === Part A: Hub inventory
 
-.Confirm RHACM Policy CRDs and local-cluster
+.Confirm CRD policies.policy.open-cluster-management.io, list managedclusters, and show labels for managedcluster local-cluster. Expect the CRD and label local-cluster=true
 [%collapsible]
 ====
-If this fails, install **Advanced Cluster Management for Kubernetes** from OperatorHub (or ask the platform owner).
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get crd policies.policy.open-cluster-management.io
 oc get managedcluster
 oc get managedcluster local-cluster --show-labels 2>/dev/null || oc get managedcluster --show-labels
 ----
-
-TIP: CRD exists. `local-cluster=true` is the usual hub label.
 ====
 
-.Bind a ClusterSet into namespace policies
+.Run ~/ocp5-rhacs-showroom/setup/acm-lab/bind-clusterset.sh. Expect a managedclustersetbinding in namespace policies
 [%collapsible]
 ====
-Skip if you already ran this in 201-10. Placement selects **zero** clusters until a `ManagedClusterSetBinding` exists.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-cd ~/openshift-security-roadshow/setup/acm-lab
+cd ~/ocp5-rhacs-showroom/setup/acm-lab
 chmod +x bind-clusterset.sh
 ./bind-clusterset.sh
 ----
-
-TIP: `managedclustersetbinding` created (or already configured) in `policies`.
 ====
 
 === Part B: Inform (report drift)
 
-.Apply the STRIDE PolicySet (inform)
+.Apply ~/ocp5-rhacs-showroom/setup/acm-lab/policy-stride-ocp-baseline.yaml. Expect Policies, PolicySet stride-ocp-baseline, a Placement, and a PlacementBinding in namespace policies
 [%collapsible]
 ====
-Three Policies + a PolicySet + Placement. Remediation starts as **inform**—RHACM reports NonCompliant until the objects exist.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-oc apply -f ~/openshift-security-roadshow/setup/acm-lab/policy-stride-ocp-baseline.yaml
+oc apply -f ~/ocp5-rhacs-showroom/setup/acm-lab/policy-stride-ocp-baseline.yaml
 ----
-
-TIP: Policies, PolicySet `stride-ocp-baseline`, Placement, and PlacementBinding created in `policies`.
 ====
 
-.Read PolicySet status (expect NonCompliant)
+.Get policyset, policy, placement, and placementbinding in namespace policies, then get namespace stride-workloads. Expect COMPLIANT NonCompliant, or "stride-workloads not created yet (inform does not remediate)"
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -107,28 +99,22 @@ TIP: Policies, PolicySet `stride-ocp-baseline`, Placement, and PlacementBinding 
 oc get policyset,policy,placement,placementbinding -n policies
 oc get ns stride-workloads 2>/dev/null || echo "stride-workloads not created yet (inform does not remediate)"
 ----
-
-TIP: `COMPLIANT` is `NonCompliant` (or empty for a few seconds). Namespace `stride-workloads` should **not** exist yet. Console: **Fleet Management → Governance → PolicySets**.
 ====
 
 === Part C: Enforce (configure the cluster from policy)
 
-.Switch the three Policies to enforce
+.Patch policies policy-stride-ns-psa, policy-stride-quota-limits, and policy-stride-netpol-sa in namespace policies so spec.remediationAction is enforce. Expect three patched
 [%collapsible]
 ====
-The PolicySet groups them; each Policy still has its own `remediationAction`. Patch all three.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 for p in policy-stride-ns-psa policy-stride-quota-limits policy-stride-netpol-sa; do
   oc patch policy "$p" -n policies --type merge -p '{"spec":{"remediationAction":"enforce"}}'
 done
 ----
-
-TIP: Three `patched` messages. Wait 15–30 seconds.
 ====
 
-.Confirm the STRIDE objects exist
+.Get policies in namespace policies with label app.kubernetes.io/component=301-01-acm, show labels on namespace stride-workloads, list networkpolicy, limitrange, resourcequota, and sa there, then print automountServiceAccountToken for service account app. Expect Compliant, pod-security.kubernetes.io/enforce=restricted, default-deny-ingress, bounded-defaults, bounded-quota, and automount false
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -138,17 +124,13 @@ oc get ns stride-workloads --show-labels
 oc get networkpolicy,limitrange,resourcequota,sa -n stride-workloads
 oc get sa app -n stride-workloads -o jsonpath='{.automountServiceAccountToken}{"\n"}'
 ----
-
-TIP: Policies `Compliant`. Namespace labels include `pod-security.kubernetes.io/enforce=restricted`. `default-deny-ingress`, `bounded-defaults`, `bounded-quota`, and SA `app` with automount `false`.
 ====
 
 === Part D: Admission still matches the baseline
 
-.Apply a privileged pod in stride-workloads (expect deny)
+.Apply Pod privileged-denied in namespace stride-workloads, container app, image registry.access.redhat.com/ubi9/ubi, privileged true, command sleep 5. Expect Forbidden and violates PodSecurity
 [%collapsible]
 ====
-`privileged: true` violates restricted PSA (AC-6 / EoP).
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n stride-workloads -f - <<'EOF'
@@ -165,8 +147,6 @@ spec:
     command: ["sleep","5"]
 EOF
 ----
-
-TIP: Admission rejects the pod (`Forbidden` / `violates PodSecurity`). The PolicySet stayed Compliant—the deny is the baseline working.
 ====
 
 == Debrief

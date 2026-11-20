@@ -1,6 +1,6 @@
 * xref:index.adoc[Welcome]
 
-.101 OpenShift Security Modules: Core Concepts & Foundations
+.101 - Core Concepts & Foundations
 * xref:basic-INDEX.adoc[101 Labs Overview]
 * xref:101-01-default-secure-behavior.adoc[101-01 - Default Secure Behavior & Why OpenShift Differs from Vanilla Kubernetes]
 * xref:101-02-projects-namespaces-boundaries.adoc[101-02 - Projects & Namespaces as Security Boundaries]
@@ -14,8 +14,9 @@
 * xref:101-10-security-compliance-addons.adoc[101-10 - CIS Audit Log Checks (Compliance Operator)]
 * xref:101-11-rebuilding-images.adoc[101-11 - Rebuilding & Hardening Images]
 * xref:101-12-enforcing-tls-routes.adoc[101-12 - Enforcing TLS on Routes]
+* xref:index.adoc[Return to Welcome]
 
-.201 OpenShift Security Modules: Intermediate Hardening & Shift-Left
+.201 - Intermediate Hardening & Shift-Left
 * xref:intermediate-INDEX.adoc[201 Labs Overview]
 * xref:201-01-custom-rbac.adoc[201-01 - Custom RBAC & ClusterRoles]
 * xref:201-02-workload-hardening.adoc[201-02 - Custom SCC, Seccomp, SELinux & User Namespaces Basics]
@@ -28,8 +29,9 @@
 * xref:201-09-sandboxed-containers-intro.adoc[201-09 - Sandboxed Containers & Workload Isolation Intro]
 * xref:201-10-admission-governance.adoc[201-10 - RHACM Policy Governance (DoD / NIST baseline)]
 * xref:201-11-threat-modeling-control-mapping.adoc[201-11 - STRIDE Control Map (capstone)]
+* xref:index.adoc[Return to Welcome]
 
-.301 OpenShift Security Modules: Advanced Enterprise & Zero-Trust
+.301 - Advanced Enterprise & Zero-Trust
 * xref:advanced-INDEX.adoc[301 Labs Overview]
 * xref:301-01-platform-security-governance.adoc[301-01 - STRIDE PolicySet (RHACM)]
 * xref:301-02-gitops-policy-compliance.adoc[301-02 - GitOps UBI Python (Red Hat catalog)]
@@ -39,6 +41,7 @@
 * xref:301-06-supply-chain-integrity.adoc[301-06 - Catalog Image Provenance and Digest Admission]
 * xref:301-07-advanced-cryptography.adoc[301-07 - Encryption Inventory (etcd, TLS, Secrets)]
 * xref:301-08-zero-trust-workload-identity.adoc[301-08 - Zero-Trust Workload Identity, Federation & SPIFFE/SPIRE Concepts]
+* xref:index.adoc[Return to Welcome]
 
 .Advanced Cluster Security Modules
 * xref:acs-INDEX.adoc[RHACS Labs Overview]
@@ -51,38 +54,54 @@
 * xref:acs-06-network-and-runtime.adoc[Network and Runtime Security]
 * xref:acs-07-installation.adoc[Installation]
 * xref:acs.adoc[ACS 5 Capabilities]
+* xref:index.adoc[Return to Welcome]
 
-.Software Supply Chain Security (Lightwell)
-* xref:tssc-INDEX.adoc[Lightwell TSSC overview]
+.Lightwell Java rebuild
+* xref:lwjava-INDEX.adoc[Lightwell Java Workshop]
+* xref:lwjava-01-incident.adoc[1. See the vulnerable release]
+* xref:lwjava-02-proxy.adoc[2. Lightwell repositories]
+* xref:lwjava-03-pin.adoc[3. Pin the critical finding]
+* xref:lwjava-04-source.adoc[4. Update the source]
+* xref:lwjava-05-bind.adoc[5. Bind the Lightwell versions]
+* xref:lwjava-06-renovate.adoc[6. Match the Renovate change]
+* xref:lwjava-07-build.adoc[7. Rebuild and read the SBOM]
+* xref:lwjava-08-sign.adoc[8. Sign the new digest]
+* xref:lwjava-09-gitops.adoc[9. Let GitOps roll the deployment]
+* xref:lwjava-10-confirm.adoc[10. Confirm the patched release]
+* xref:index.adoc[Return to Welcome]
+
+.Secure Software Supply Chain with Red Hat Lightwell 
+* xref:tssc-INDEX.adoc[Lightwell TSSC Overview]
 * xref:tssc-01-hummingbird-verify.adoc[1.1 Verify Hummingbird]
-* xref:tssc-02-hummingbird-mirror.adoc[1.2 Mirror into the trust boundary]
-* xref:tssc-03-enterprise-proxy.adoc[2.1 Enterprise proxy]
-* xref:tssc-04-remediated-pin.adoc[2.2 Remediated pin]
-* xref:tssc-05-golden-path-source.adoc[3.1 Golden-path source]
-* xref:tssc-06-bind-base-deps.adoc[3.2 Bind base and deps]
+* xref:tssc-02-hummingbird-mirror.adoc[1.2 Mirror into the Trust Boundary]
+* xref:tssc-03-enterprise-proxy.adoc[2.1 Enterprise Proxy]
+* xref:tssc-04-remediated-pin.adoc[2.2 Remediated Pin]
+* xref:tssc-05-golden-path-source.adoc[3.1 Golden-Path Source]
+* xref:tssc-06-bind-base-deps.adoc[3.2 Bind Base and Deps]
 * xref:tssc-07-live-renovate.adoc[3.3 Live Renovate]
-* xref:tssc-08-forbid-list.adoc[4.1 Source forbid-list]
-* xref:tssc-09-prefetch.adoc[4.2 Prefetch (Hermeto mapping)]
+* xref:tssc-08-forbid-list.adoc[4.1 Source Forbid-List]
+* xref:tssc-09-prefetch.adoc[4.2 Prefetch (Hermeto Mapping)]
 * xref:tssc-10-build-networkpolicy.adoc[4.3 Build NetworkPolicy]
 * xref:tssc-11-build-sbom.adoc[4.4 Build and SBOM]
-* xref:tssc-12-sign-keyless.adoc[5.1 Sign (keyless)]
+* xref:tssc-12-sign-keyless.adoc[5.1 Sign (Keyless)]
 * xref:tssc-13-attest-conforma.adoc[5.2 Attest + Conforma]
-* xref:tssc-14-disconnected-verify.adoc[5.3 Disconnected verify]
-* xref:tssc-15-gitops-admission.adoc[6.1 GitOps + admission]
-* xref:tssc-16-prod-gitops.adoc[6.2 Promote to prod repo]
-* xref:tssc-17-sbom-sor.adoc[7.1 SBOM system of record]
-* xref:tssc-18-vex-acs.adoc[7.2 VEX blast radius + ACS]
-* xref:appendix-consultant-delivery.adoc[Consultant delivery map]
-* xref:appendix-konflux-mapping.adoc[Konflux mapping]
-* xref:appendix-disconnected-playbook.adoc[Disconnected transfer]
-* xref:appendix-instructor-runbook.adoc[Instructor two-day grouping]
-* xref:appendix-enablement-checklist.adoc[Internal enablement checklist]
-* xref:appendix-lightwell-concepts.adoc[Lightwell concepts]
-* xref:appendix-acronyms.adoc[Acronym glossary]
-* xref:rhda-shift-left.adoc[RHDA shift-left (laptop)]
-* xref:appendix-osv-manifest-polling.adoc[OSV PULP_MANIFEST polling]
+* xref:tssc-14-disconnected-verify.adoc[5.3 Disconnected Verify]
+* xref:tssc-15-gitops-admission.adoc[6.1 GitOps + Admission]
+* xref:tssc-16-prod-gitops.adoc[6.2 Promote to Prod Repo]
+* xref:tssc-17-sbom-sor.adoc[7.1 SBOM System of Record]
+* xref:tssc-18-vex-acs.adoc[7.2 VEX Blast Radius + ACS]
+* xref:appendix-consultant-delivery.adoc[Consultant Delivery Map]
+* xref:appendix-konflux-mapping.adoc[Konflux Mapping]
+* xref:appendix-disconnected-playbook.adoc[Disconnected Transfer]
+* xref:appendix-instructor-runbook.adoc[Instructor Two-Day Grouping]
+* xref:appendix-enablement-checklist.adoc[Internal Enablement Checklist]
+* xref:appendix-lightwell-concepts.adoc[Lightwell Concepts]
+* xref:appendix-acronyms.adoc[Acronym Glossary]
+* xref:rhda-shift-left.adoc[RHDA Shift-Left (Laptop)]
+* xref:appendix-osv-manifest-polling.adoc[OSV PULP_MANIFEST Polling]
+* xref:index.adoc[Return to Welcome]
 
-.OpenShift Virtualization Security Modules
+.OpenShift Virtualization Hardening Modules
 * xref:virt-INDEX.adoc[Virtualization Labs Overview]
 * xref:virt-00-scope-and-hco.adoc[Scope and HyperConverged]
 * xref:virt-01-feature-gates-and-trusted-config.adoc[Feature Gates and Trusted Config]
@@ -92,3 +111,4 @@
 * xref:virt-05-storage-isolation.adoc[DataVolume Cloning and Disk Isolation]
 * xref:virt-06-network-segmentation.adoc[VLAN, MAC Spoof, and MultiNetworkPolicy]
 * xref:virt-07-host-firmware-and-kernel.adoc[Host Firmware and Kernel]
+* xref:index.adoc[Return to Welcome]

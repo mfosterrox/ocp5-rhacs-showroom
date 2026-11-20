@@ -1,0 +1,5 @@
+source: https://github.com/mfosterrox/workshops
+upstream: https://github.com/jmhbnz/workshops
+branch: main
+commit: 5bcaa4b3daf99d406b3d4066166a832499ef9d05
+fetched: 2026-11-17T01:50:17Z

@@ -1,0 +1,115 @@
+# Sample pods on the checkout and ledger networks. Applied after both
+# ClusterUserDefinedNetworks report NetworkCreated.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: checkout-web
+  labels:
+    app: web
+    app.kubernetes.io/part-of: checkout-service
+    app.kubernetes.io/name: checkout-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+        app.kubernetes.io/part-of: checkout-service
+        app.kubernetes.io/name: checkout-web
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: registry.access.redhat.com/ubi9/ubi:latest
+          command: ["sleep", "infinity"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: checkout-api
+  labels:
+    app: api
+    app.kubernetes.io/part-of: checkout-service
+    app.kubernetes.io/name: checkout-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+        app.kubernetes.io/part-of: checkout-service
+        app.kubernetes.io/name: checkout-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: registry.access.redhat.com/ubi9/ubi:latest
+          command: ["sleep", "infinity"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger
+  namespace: ledger
+  labels:
+    app: ledger
+    app.kubernetes.io/part-of: ledger-service
+    app.kubernetes.io/name: ledger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ledger
+  template:
+    metadata:
+      labels:
+        app: ledger
+        app.kubernetes.io/part-of: ledger-service
+        app.kubernetes.io/name: ledger
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ledger
+          image: registry.access.redhat.com/ubi9/ubi:latest
+          command: ["sleep", "infinity"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault

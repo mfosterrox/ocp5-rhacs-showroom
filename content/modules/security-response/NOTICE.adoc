@@ -1,0 +1,7 @@
+= Notice
+
+The OpenShift security response workshop in this module is adapted from James Blair's workshop in https://github.com/jmhbnz/workshops[jmhbnz/workshops], directory `data/security-new`.
+
+That workshop is licensed under the GNU General Public License version 3. A copy of the license is in `vendor/security-response/LICENSE`. The filtered upstream snapshot, including the commit that was fetched, is in `vendor/security-response/`.
+
+Pages in this module are a derivative of that workshop and stay under GPL-3.0. The rest of this repository remains under the Apache License 2.0 in the repository root `LICENSE`.

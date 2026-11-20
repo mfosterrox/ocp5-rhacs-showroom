@@ -1,0 +1,65 @@
+= 6. Match the Renovate change
+:toc:
+:toclevels: 1
+
+== Overview
+
+Renovate is what opens these pull requests on the demo repository. GitHub Actions will not run in this lab. You already applied the versions that preset would open. This module checks that your pom matches that change.
+
+== Why it matters
+
+The preset `java-remediated` only moves a coordinate onto a Lightwell rebuild of the same upstream line. It does not jump Spring Boot from 2.6 to a current major. Your pins should look like that pull request, not like a general dependency upgrade.
+
+== Read the preset
+
+. Show `renovate.json`
++
+[source,bash,role=execute]
+----
+cd "${HOME}/help-im-vulnerable"
+python3 - <<'PY'
+import json
+cfg = json.load(open("renovate.json"))
+print("\n".join(cfg["extends"]))
+print(cfg["packageRules"][0]["registryUrls"][0])
+PY
+----
++
+Expected output:
++
+----
+config:recommended
+github>lightwell-experience/renovate-config:java-remediated#1.0.2
+https://packages.redhat.com/lightwell/public-lightwell-demo/java/remediated/
+----
+
+The registry URL is the same remediated repository you read in xref:lwjava-02-proxy.adoc[module 2]. The `#1.0.2` pin keeps the preset from moving under you.
+
+== Verify the pom matches the preset
+
+A remediation pull request for this demo would set:
+
+* `5.3.18.rhlw-00010` on the three Spring Framework artifacts
+* `6.0.3.rhlw-00001` on `woodstox-core`
+* `20220320.0.0.rhlw-00003` on `org.json:json`
+* `2.8.0.rhlw-00001` on `json-path`
+
+. Fail if any of those pins are missing
++
+[source,bash,role=execute]
+----
+cd "${HOME}/help-im-vulnerable"
+grep -q '5.3.18.rhlw-00010' pom.xml
+grep -q '6.0.3.rhlw-00001' pom.xml
+grep -q '20220320.0.0.rhlw-00003' pom.xml
+grep -q '2.8.0.rhlw-00001' pom.xml
+echo "pom matches the Lightwell remediation pins"
+----
++
+Expected output:
++
+----
+pom matches the Lightwell remediation pins
+----
+
+Continue with xref:lwjava-07-build.adoc[7. Rebuild and read the SBOM].

@@ -1,0 +1,47 @@
+= 8. Sign the new digest
+:toc:
+:toclevels: 1
+
+== Overview
+
+You sign the digest you just built. This signature is yours. It is separate from the signature Lightwell puts on a rebuilt jar, and separate from the seven-track keyless pipeline.
+
+== Why it matters
+
+The Deployment is about to run this digest. A digest with no signature is an image you cannot tell from a later rebuild of the same tag.
+
+== Sign
+
+`cosign` is installed by the welcome setup script. Log in to the internal registry, then sign the digest with a key pair stored only on this bastion.
+
+. Create a lab key if you do not already have one, and sign the new digest
++
+[source,bash,role=execute]
+----
+oc registry login
+NEW="$(oc -n help-im-vulnerable get istag help-im-vulnerable:vulnerable -o jsonpath='{.image.dockerImageReference}')"
+mkdir -p "${HOME}/help-im-vulnerable-keys"
+if [[ ! -f "${HOME}/help-im-vulnerable-keys/cosign.key" ]]; then
+  ( cd "${HOME}/help-im-vulnerable-keys" && COSIGN_PASSWORD= cosign generate-key-pair )
+fi
+COSIGN_PASSWORD= cosign sign --yes \
+  --key "${HOME}/help-im-vulnerable-keys/cosign.key" \
+  --tlog-upload=false \
+  "${NEW}"
+----
+
+Do not commit `cosign.key`. It stays under your home directory.
+
+== Verify
+
+[source,bash,role=execute]
+----
+NEW="$(oc -n help-im-vulnerable get istag help-im-vulnerable:vulnerable -o jsonpath='{.image.dockerImageReference}')"
+cosign verify --key "${HOME}/help-im-vulnerable-keys/cosign.pub" \
+  --insecure-ignore-tlog \
+  "${NEW}"
+----
+
+Expected output includes the digest you built and a verified signature. Verification fails if you point `--key` at a different public key, or if `NEW` is still the digest in ConfigMap `help-im-vulnerable-digest`.
+
+Continue with xref:lwjava-09-gitops.adoc[9. Let GitOps roll the deployment].

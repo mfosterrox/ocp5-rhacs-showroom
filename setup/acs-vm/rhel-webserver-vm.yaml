@@ -1,0 +1,76 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: rhel-webserver
+  namespace: rhacs-virt-webserver
+  labels:
+    app: rhel-webserver
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/domain: rhel-webserver
+        kubevirt.io/size: small
+    spec:
+      domain:
+        cpu:
+          cores: 1
+          sockets: 1
+          threads: 1
+        devices:
+          autoattachVSOCK: true
+          disks:
+            - bootOrder: 1
+              disk:
+                bus: virtio
+              name: rootdisk
+            - disk:
+                bus: virtio
+              name: cloudinitdisk
+          interfaces:
+            - name: checkout-service
+              binding:
+                name: l2bridge
+              model: virtio
+          rng: {}
+        features:
+          acpi: {}
+          smm:
+            enabled: true
+        firmware:
+          bootloader:
+            # EFI defaults to Secure Boot. The setup script treats that as a
+            # guest that must be replaced, and virt-controller records the
+            # delete as CrashLoopBackOff. roxagent also needs Secure Boot off.
+            efi:
+              secureBoot: false
+        machine:
+          type: pc-q35-rhel9.6.0
+        memory:
+          guest: 2Gi
+      # Control plane nodes on this cluster also have the worker label, so a
+      # worker nodeSelector still places virt-launcher there.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/worker
+                    operator: Exists
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+                  - key: node-role.kubernetes.io/master
+                    operator: DoesNotExist
+      networks:
+        - name: checkout-service
+          pod: {}
+      terminationGracePeriodSeconds: 180
+      volumes:
+        - name: rootdisk
+          containerDisk:
+            image: quay.io/rhpds/ocp5-vm-primed:rhel9
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            secretRef:
+              name: rhel-webserver-cloudinit

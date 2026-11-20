@@ -1,0 +1,65 @@
+= 10. Confirm the patched release
+:toc:
+:toclevels: 1
+
+== Overview
+
+You confirm three views of the same digest: the route, the SBOM inside the image, and RHACS. The status API still prints the original version strings. Those strings are compiled into the page. The SBOM is the proof of what was resolved.
+
+== Why it matters
+
+A route that answers does not by itself mean the Lightwell jars were packaged. The SBOM written at package time lists the coordinates Maven resolved. RHACS scans the image that is now running.
+
+== Route
+
+. The service is up. Woodstox still reports `version` `6.0.3` and `lightwellFix` `6.0.3.rhlw-00001` because that text is hardcoded in the application.
++
+[source,bash,role=execute]
+----
+HOST="$(oc -n help-im-vulnerable get route help-im-vulnerable -o jsonpath='{.spec.host}')"
+curl -sk "https://${HOST}/api/status" | jq '.[] | select(.library=="Woodstox") | {version,lightwellFix,loaded}'
+----
++
+Expected output:
++
+----
+{
+  "version": "6.0.3",
+  "lightwellFix": "6.0.3.rhlw-00001",
+  "loaded": true
+}
+----
+
+== SBOM
+
+. The packaged SBOM contains the Woodstox rebuild
++
+[source,bash,role=execute]
+----
+oc -n help-im-vulnerable exec deploy/help-im-vulnerable -- \
+  grep -o '6.0.3.rhlw-00001' /deployments/maven-sbom.json | head -1
+oc -n help-im-vulnerable exec deploy/help-im-vulnerable -- \
+  grep -o '5.3.18.rhlw-00010' /deployments/maven-sbom.json | head -1
+----
++
+Expected output:
++
+----
+6.0.3.rhlw-00001
+5.3.18.rhlw-00010
+----
+
+== RHACS
+
+. Open the *Red Hat Advanced Cluster Security* tab.
+. Open *Vulnerability Management* and select namespace `help-im-vulnerable`.
+. Confirm the workload image digest matches `new=` from xref:lwjava-09-gitops.adoc[module 9], not ConfigMap `help-im-vulnerable-digest`.
+. Rescan that image if the finding list still describes the previous digest. Feed timing varies. The image under review must be the digest you signed.
+
+== What you changed
+
+* The vulnerable release stayed in GitOps and in ConfigMap `help-im-vulnerable-digest`
+* The source pin moved Woodstox `6.0.3` to `6.0.3.rhlw-00001`, with the Spring, `org.json`, and json-path rebuilds
+* A new image was built from that source, signed, and rolled out by Application `lightwell-java`
+
+The seven-track supply-chain lab is a separate path. It still uses `spring-boot-lw-poc` and its own Checks. Return to xref:index.adoc[Welcome] when you are finished.

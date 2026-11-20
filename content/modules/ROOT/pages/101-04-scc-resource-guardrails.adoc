@@ -5,6 +5,7 @@
 :audit-evidence: "Port 80 start and runAsUser=0 fail under restricted; after anyuid grant pod runs as UID 0 illustrating risky exception. LimitRange injects default requests/limits; quota denies excessive replicas and oversized limits with observable FailedCreate/quota events."
 :cis-mitre-codes: '{"cisMapping":{"primary":["5.2.6","4.2.8"],"related":[]},"mitre":{"techniques":["T1611","T1499"],"tactics":["TA0004","TA0040"],"mitigations":["M1048","M1026","M1037"]}}'
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~20 minutes
@@ -34,29 +35,26 @@ Attackers prefer pods that already run as root. Refusing that by default removes
 == Your Mission
 Refuse the privilege ladder attackers want (`anyuid`, UID 0, port 80) and stop noisy-neighbor resource grabs with LimitRange and ResourceQuota. Complete *Part A*, then *Part B*.
 
-Click each step only if you need a hint.
+Click each step for the full solution.
+
+:lab-run-module: 101-04
+include::partial$lab-run.adoc[]
 
 === Part A: SCC Limits & Non-Root Realities
 An unpatched vendor image wants root and port 80—exactly the privilege ladder attackers climb after breakout. Prove restricted SCC blocks it, see what `anyuid` would unlock if you caved, and document any unavoidable exception instead of silently normalizing root.
 
-.Create project 101-04-s-scc-demo
+.Create project 101-04-s-scc-demo or switch to project 101-04-s-scc-demo
 [%collapsible]
 ====
-Stay in this project for every Part A command so SCC grants land on the lab namespace, not whatever you had selected last.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 101-04-s-scc-demo || oc project 101-04-s-scc-demo
 ----
-
-TIP: `oc project` should print `Now using project "101-04-s-scc-demo"`.
 ====
 
-.Deploy python http.server on port 80
+.Create deployment vendor-app from registry.access.redhat.com/ubi9/python-311 running python3 -m http.server 80, wait up to 90s, then get pods labeled app=vendor-app. Expect CrashLoopBackOff
 [%collapsible]
 ====
-The image pull can take a minute. Wait until the rollout gives up (the pod will not become Available) before reading logs.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create deployment vendor-app --image=registry.access.redhat.com/ubi9/python-311 -- python3 -m http.server 80
@@ -67,28 +65,20 @@ oc rollout status deployment/vendor-app --timeout=90s || true
 ----
 oc get pods -l app=vendor-app
 ----
-
-TIP: Expect `CrashLoopBackOff`. `ContainerCreating` means the image is still pulling -- wait and re-run `oc get pods`.
 ====
 
-.Read vendor-app logs
+.Read the last 50 log lines for pods labeled app=vendor-app. Expect PermissionError
 [%collapsible]
 ====
-Look for `PermissionError` (cannot bind port 80 as non-root).
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc logs -l app=vendor-app --tail=50 --all-containers=true || true
 ----
-
-TIP: `PermissionError` is the restricted SCC result, not a bad image pull.
 ====
 
-.Patch vendor-app to runAsUser 0
+.Patch deployment vendor-app securityContext runAsUser to 0, restart it, then show the last 3 FailedCreate events for vendor-app. Expect runAsUser Invalid value 0
 [%collapsible]
 ====
-The platform should refuse UID 0 under restricted SCC.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc patch deployment vendor-app --type='json' -p='[{"op":"add","path":"/spec/template/spec/securityContext","value":{"runAsUser":0}}]'
@@ -99,29 +89,21 @@ oc rollout restart deployment/vendor-app
 ----
 oc get events --field-selector reason=FailedCreate --sort-by=.lastTimestamp | grep vendor-app | tail -n 3 || true
 ----
-
-TIP: Look for `runAsUser: Invalid value: 0` and `must be in the ranges`. The long provider list is normal; the UID-0 refusal is the win.
 ====
 
-.Grant anyuid to the default ServiceAccount in this namespace
+.Switch to project 101-04-s-scc-demo and grant SCC anyuid to service account default in namespace 101-04-s-scc-demo. Expect the grant, or Forbidden
 [%collapsible]
 ====
-Granting `anyuid` is how teams accidentally gift attackers root-in-container. Observe what it unlocks, then treat it as an anti-pattern. Pin the grant to this lab namespace.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc project 101-04-s-scc-demo
 oc adm policy add-scc-to-user anyuid -z default -n 101-04-s-scc-demo || echo 'Forbidden -- expected if you cannot grant SCCs. That is the correct production outcome.'
 ----
-
-TIP: On the roadshow bastion this often succeeds because your user is privileged. Forbidden is the outcome you want in production.
 ====
 
-.Restart vendor-app and read its UID
+.Restart deployment vendor-app in 101-04-s-scc-demo, wait up to 120s, then run id -u and read the last 10 logs. Expect UID 0 if anyuid was granted
 [%collapsible]
 ====
-Wait for the new pod before `exec` or logs -- otherwise you will still see `ContainerCreating`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc rollout restart deployment/vendor-app -n 101-04-s-scc-demo
@@ -133,15 +115,11 @@ oc rollout status deployment/vendor-app -n 101-04-s-scc-demo --timeout=120s || t
 oc exec -n 101-04-s-scc-demo deploy/vendor-app -- id -u || true
 oc logs -n 101-04-s-scc-demo -l app=vendor-app --tail=10 --all-containers=true || true
 ----
-
-TIP: If the grant succeeded, `id -u` is `0` and the process can listen on 80. That restored root for whoever owns the pod next.
 ====
 
-.Annotate the namespace with a risk acceptance
+.Annotate namespace 101-04-s-scc-demo with openshift.io/risk-accepted.vendor-app="Requires anyuid for privileged port" and openshift.io/risk-accepted-approved-by.vendor-app="InfoSec Team"
 [%collapsible]
 ====
-For third-party apps you cannot rebuild, register a discoverable risk acceptance instead of a silent, forever grant. Multiple deployments? Use keys suffixed by deployment name.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc annotate namespace 101-04-s-scc-demo \
@@ -149,19 +127,15 @@ oc annotate namespace 101-04-s-scc-demo \
   openshift.io/risk-accepted-approved-by.vendor-app="InfoSec Team" \
   --overwrite
 ----
-
-TIP: `oc annotate` should report the namespace annotated.
 ====
 
-.Grep the namespace for risk-accepted annotations
+.Show namespace 101-04-s-scc-demo lines matching openshift.io/risk-accepted. Expect both vendor-app risk annotations
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get ns 101-04-s-scc-demo -o yaml | grep -E 'openshift.io/risk-accepted'
 ----
-
-NOTE: Keep this for exceptional cases. The preferred path is to rebuild images so they run under the restricted SCC without anyuid. Leave `101-04-s-scc-demo` in place until the module cleanup at the end.
 ====
 
 === Part B: Resource Usage (Quotas & Limits)
@@ -171,11 +145,9 @@ Use a **new** project (`101-04-s-resources-demo`). Do not delete the Part A proj
 
 Image: UBI `sleep infinity`.
 
-.Create project 101-04-s-resources-demo
+.Create project 101-04-s-resources-demo or switch to it, then show the current project. Expect 101-04-s-resources-demo
 [%collapsible]
 ====
-Use a **new** project. Do not delete the Part A project yet -- both namespaces are removed by the cleanup script at the end of this module.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 101-04-s-resources-demo || oc project 101-04-s-resources-demo
@@ -185,15 +157,11 @@ oc new-project 101-04-s-resources-demo || oc project 101-04-s-resources-demo
 ----
 oc project
 ----
-
-TIP: Current project should be `101-04-s-resources-demo`.
 ====
 
-.Apply LimitRange default-limits
+.Apply LimitRange default-limits in namespace 101-04-s-resources-demo for type Container, with defaultRequest cpu=100m memory=128Mi, default cpu=500m memory=256Mi, min cpu=50m memory=64Mi, max cpu=1 memory=512Mi, and maxLimitRequestRatio cpu=5 memory=4
 [%collapsible]
 ====
-This LimitRange sets default requests/limits and maxes for every container in the namespace.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<'EOF'
@@ -222,29 +190,21 @@ spec:
       memory: "4"
 EOF
 ----
-
-TIP: `oc apply` should report `limitrange/default-limits created` (or configured).
 ====
 
-.Get LimitRange default-limits
+.Switch to project 101-04-s-resources-demo and show LimitRange default-limits. Expect defaultRequest cpu=100m memory=128Mi and default cpu=500m memory=256Mi
 [%collapsible]
 ====
-Confirm defaults and caps are on the object.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc project 101-04-s-resources-demo
 oc get limitrange default-limits -n 101-04-s-resources-demo -o jsonpath='{.spec.limits[0]}' | sed 's/,/\n/g'
 ----
-
-TIP: You should see 100m/128Mi requests and 500m/256Mi limits in the output.
 ====
 
-.Create ResourceQuota compute-quota
+.Switch to project 101-04-s-resources-demo and create ResourceQuota compute-quota with requests.cpu=2, requests.memory=2Gi, limits.cpu=4, limits.memory=4Gi, and pods=10
 [%collapsible]
 ====
-Hard caps for the namespace: 2 CPU request, 2Gi memory request, 10 pods.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc project 101-04-s-resources-demo
@@ -255,26 +215,20 @@ oc create quota compute-quota -n 101-04-s-resources-demo \
   --hard=limits.memory=4Gi \
   --hard=pods=10
 ----
-
-TIP: `resourcequota/compute-quota created`.
 ====
 
-.Describe ResourceQuota compute-quota
+.Describe ResourceQuota compute-quota in 101-04-s-resources-demo, first 25 lines. Expect used near zero
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc describe quota compute-quota -n 101-04-s-resources-demo | sed -n '1,25p'
 ----
-
-TIP: Used should still be near zero before you deploy `stress`.
 ====
 
-.Deploy stress without setting resources
+.In 101-04-s-resources-demo, create deployment stress from registry.access.redhat.com/ubi9/ubi running sleep infinity, wait until Available within 90s, then show container resources. Expect requests cpu=100m memory=128Mi and limits cpu=500m memory=256Mi
 [%collapsible]
 ====
-LimitRange should fill in default requests and limits. Image: UBI `sleep infinity`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc project 101-04-s-resources-demo
@@ -286,15 +240,11 @@ oc create deployment stress --image=registry.access.redhat.com/ubi9/ubi -- /bin/
 oc wait -n 101-04-s-resources-demo --for=condition=Available deployment/stress --timeout=90s
 oc get pod -n 101-04-s-resources-demo -l app=stress -o jsonpath='{.items[0].spec.containers[0].resources}{"\n"}'
 ----
-
-TIP: Expect requests 100m/128Mi and limits 500m/256Mi.
 ====
 
-.Set stress resources within the LimitRange
+.Set deploy/stress in 101-04-s-resources-demo requests to cpu=300m,memory=256Mi and limits to cpu=800m,memory=512Mi, restart it, wait until Available within 90s, then show container resources. Expect those values
 [%collapsible]
 ====
-Stay under max CPU 1 and max memory 512Mi.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc set resources deploy/stress -n 101-04-s-resources-demo --requests=cpu=300m,memory=256Mi --limits=cpu=800m,memory=512Mi
@@ -306,15 +256,11 @@ oc rollout restart deploy/stress -n 101-04-s-resources-demo
 oc wait -n 101-04-s-resources-demo --for=condition=Available deployment/stress --timeout=90s
 oc get pod -n 101-04-s-resources-demo -l app=stress -o jsonpath='{.items[0].spec.containers[0].resources}{"\n"}'
 ----
-
-TIP: Pod resources should match 300m/256Mi requests and 800m/512Mi limits.
 ====
 
-.Set stress limits above the LimitRange max
+.Set deployment/stress in 101-04-s-resources-demo limits to cpu=2,memory=1Gi, restart it, then show FailedCreate, the running pod resources, and the Deployment limits. Expect FailedCreate and the previous valid resources on the running pod
 [%collapsible]
 ====
-Admission should stop the oversize grab. CPU 2 is above max `"1"`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc set resources deployment/stress -n 101-04-s-resources-demo --limits=cpu=2,memory=1Gi
@@ -331,15 +277,11 @@ oc get deploy stress -n 101-04-s-resources-demo -o jsonpath='{range .status.cond
 oc get pod -n 101-04-s-resources-demo -l app=stress -o jsonpath='{.items[0].spec.containers[0].resources}{"\n"}'
 oc get deploy stress -n 101-04-s-resources-demo -o jsonpath='{.spec.template.spec.containers[0].resources.limits}{"\n"}'
 ----
-
-TIP: Look for `FailedCreate`. The running pod should still be on the previous (valid) resources.
 ====
 
-.Scale stress to 25 replicas
+.Scale deployment stress in 101-04-s-resources-demo to 25 replicas, then show the latest FailedCreate event for compute-quota and quota compute-quota. Expect a compute-quota event and used pods at 10, not 25
 [%collapsible]
 ====
-Pod quota is 10. Replica flood should fail with a quota event.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc scale deployment stress -n 101-04-s-resources-demo --replicas=25 || true
@@ -350,8 +292,6 @@ oc scale deployment stress -n 101-04-s-resources-demo --replicas=25 || true
 oc get events -n 101-04-s-resources-demo --sort-by=.lastTimestamp | grep -E 'FailedCreate.*compute-quota' | tail -1 || true
 oc get quota compute-quota -n 101-04-s-resources-demo
 ----
-
-TIP: An event should mention `compute-quota`. Used pods should sit at the quota max, not 25.
 ====
 
 == Debrief

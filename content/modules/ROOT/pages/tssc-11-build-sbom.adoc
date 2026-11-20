@@ -1,7 +1,7 @@
 = 4.4 Build and SBOM
 :source-highlighter: rouge
 :toc:
-:toclevels: 2
+:toclevels: 1
 
 == Overview
 
@@ -25,7 +25,7 @@ Clearinghouse Premier does not change the builder. Member GAVs appear in the sam
 
 == BuildConfig vs Buildah
 
-Konflux “build” on hosted Konflux is often Buildah. This cluster maps that control to Binary BuildConfig started from Tekton (`oc start-build --from-dir`). Do not add a Buildah task. The term map is in xref:appendix-konflux-mapping.adoc[Konflux mapping].
+Konflux “build” on hosted Konflux is often Buildah. This cluster maps that control to Binary BuildConfig started from Tekton (`oc start-build --from-dir`). Do not add a Buildah task. The term map is in xref:appendix-konflux-mapping.adoc[Konflux Mapping].
 
 == Worked example (not the Check)
 
@@ -44,6 +44,8 @@ A Buildah task that never creates ImageStream `spring-boot-lw-poc`. Paste-identi
 
 == Your change: successful pipeline in the build namespace
 
+. Your change: successful pipeline in the build namespace
++
 [source,bash,role=execute]
 ----
 BUILD_NS="$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_build_namespace}')"
@@ -53,29 +55,67 @@ echo "REPO_URL=${REPO_URL}"
 oc -n "${BUILD_NS}" apply -f /tmp/spring-boot-lw-poc/.tekton/rbac.yaml
 oc -n "${BUILD_NS}" apply -f /tmp/spring-boot-lw-poc/.tekton/pipeline.yaml
 ----
++
+Expected output:
++
+----
+BUILD_NS=lw-poc-build
+REPO_URL=http://gitea.gitea.svc:3000/lw-student/spring-boot-lw-poc.git
+pipeline.tekton.dev/spring-boot-lw-poc-build-sign configured
+----
 
 Edit `.tekton/pipelinerun.yaml`: replace `STUDENT_REPO_URL_PLACEHOLDER` with `student_repo_internal_url` (`http://gitea.gitea.svc:3000/…` — the HTTPS Route is blocked after 4.3), replace `<lab-namespace>` with `lw-poc-build`, and fill Fulcio/Rekor/TUF from `demo-userinfo-rhtas` **`fulcio_internal_url` / `rekor_internal_url` / `tuf_internal_url`** (in-cluster Services). Route hints (`fulcio_url_hint`) fail after 4.3. Leave syft `rhtpa-url` empty — Track 7 uploads from Showroom.
 
-Check 12 (xref:tssc-12-sign-keyless.adoc[5.1]) reads this file from *Gitea*, not the live PipelineRun. `oc create` alone leaves the placeholder on origin. Commit and push *before* you create the run:
-
+. Check 12 (xref:tssc-12-sign-keyless.adoc[5.1]) reads this file from *Gitea*, not the live PipelineRun. `oc create` alone leaves the placeholder on origin. Commit and push *before* you create the run
++
 [source,bash,role=execute]
 ----
 cd /tmp/spring-boot-lw-poc
+BUILD_NS="$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_build_namespace}')"
+REPO_URL="$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_repo_internal_url}')"
+python3 - "${BUILD_NS}" "${REPO_URL}" << 'PY'
+import pathlib, sys
+ns, repo = sys.argv[1], sys.argv[2]
+path = pathlib.Path(".tekton/pipelinerun.yaml")
+text = path.read_text()
+text = text.replace("STUDENT_REPO_URL_PLACEHOLDER", repo)
+text = text.replace("<lab-namespace>", ns)
+path.write_text(text)
+PY
 git add .tekton/pipelinerun.yaml
 git status
 git diff --cached
 git commit -m "Fill PipelineRun in-cluster repo, namespace, and RHTAS URLs"
 git push origin HEAD
 ----
++
+Expected output:
++
+----
+Fill PipelineRun in-cluster repo, namespace, and RHTAS URLs
+ 1 file changed
+----
 
-Then create the PipelineRun from the filled file:
+The commit hash differs on each run.
 
+. Then create the PipelineRun from the filled file
++
 [source,bash,role=execute]
 ----
 BUILD_NS="$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_build_namespace}')"
-oc -n "${BUILD_NS}" create -f /tmp/spring-boot-lw-poc/.tekton/pipelinerun.yaml
-oc -n "${BUILD_NS}" get pipelinerun -w
+PR="$(oc -n "${BUILD_NS}" create -f /tmp/spring-boot-lw-poc/.tekton/pipelinerun.yaml -o name)"
+oc -n "${BUILD_NS}" wait "${PR}" --for=condition=Succeeded --timeout=20m || true
+oc -n "${BUILD_NS}" get "${PR}"
 ----
++
+Expected output:
++
+----
+pipelinerun.tekton.dev/spring-boot-lw-poc-build-sign-
+Succeeded
+----
+
+The run name differs each time. `openshift-build` and `syft-sbom-rhtpa` both need `Succeeded`.
 
 Wait until `openshift-build` and `syft-sbom-rhtpa` succeed. ACS may fail or soft-skip; this Check is image + SBOM, not ACS (Track 7) and not cosign verify (Track 5).
 
@@ -84,6 +124,8 @@ image::pipelinerun-buildconfig-sbom.png[PipelineRun graph with BuildConfig and S
 
 == Check: image + SBOM; known-bad still fails
 
+. Check: image + SBOM; known-bad still fails
++
 [source,bash,role=execute]
 ----
 BUILD_NS="$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_build_namespace}')"
@@ -92,33 +134,42 @@ oc -n "${BUILD_NS}" get pipelinerun
 # SBOM workspace / Task result — name may vary; confirm the syft task Succeeded
 oc -n "${BUILD_NS}" get tr -l tekton.dev/pipelineTask=syft-sbom-rhtpa
 ----
++
+Expected output:
++
+----
+image-registry.openshift-image-registry.svc:5000/lw-poc-build/spring-boot-lw-poc
+spring-boot-lw-poc-build-sign-
+Succeeded
+syft-sbom-rhtpa
+----
 
-Known-bad: patch the BuildConfig Dockerfile, start a binary build, then restore the good path. `oc start-build` has no `-DdockerfilePath`. The first `registry-1.docker.io` / `dial tcp …:443: i/o timeout` is the fail — press **Ctrl-C**. That only stops `--follow`; OpenShift keeps retrying the pull for many minutes and **queues** later Binary builds (5.2 / 7.2 PipelineRuns). Cancel the Build, then restore `dockerfilePath`.
-
+. Known-bad: patch the BuildConfig Dockerfile, start a binary build, then restore the good path. `oc start-build` has no `-DdockerfilePath`. The build fails. On this cluster the public base is cached and the failure is `Could not resolve host: example.invalid`. Other clusters time out on `registry-1.docker.io` instead. Cancel the Build, then restore `dockerfilePath`.
++
 [source,bash,role=execute]
 ----
 BUILD_NS="$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_build_namespace}')"
 cd /tmp/spring-boot-lw-poc
 oc -n "${BUILD_NS}" patch bc spring-boot-lw-poc --type=json \
   -p '[{"op":"replace","path":"/spec/strategy/dockerStrategy/dockerfilePath","value":"Dockerfile.known-bad"}]'
-# Ctrl-C after the first registry-1.docker.io timeout — do not wait out retries.
+# Public base may time out on registry-1.docker.io, or a cached image fails on example.invalid.
 oc -n "${BUILD_NS}" start-build spring-boot-lw-poc --from-dir=. --follow || true
 # Ctrl-C does not cancel the Build. Cancel it so later oc start-build / PipelineRuns are not queued.
 oc -n "${BUILD_NS}" cancel-build bc/spring-boot-lw-poc
 oc -n "${BUILD_NS}" patch bc spring-boot-lw-poc --type=json \
   -p '[{"op":"replace","path":"/spec/strategy/dockerStrategy/dockerfilePath","value":"Dockerfile"}]'
 ----
++
+Expected output:
++
+----
+Could not resolve host: example.invalid
+failed to cancel
+----
+
+Cancel the known-bad Build after that timeout, then point `dockerfilePath` back at `Dockerfile`. The registry address differs each run.
 
 It must fail (public `FROM` / `curl` after 4.1–4.3). Do not leave the BuildConfig pointed at the known-bad file, and do not leave a Running known-bad Build.
-
-:report-name: report-11-build-sbom
-:report-key: image_builder
-:report-token: buildconfig
-include::partial$validate-job-report.adoc[]
-
-:validate-job: validate-11-build-sbom
-:validate-job-template: job-11.yaml
-include::partial$validate-job-rerun.adoc[]
 
 Honor system: Track 5 still opens.
 

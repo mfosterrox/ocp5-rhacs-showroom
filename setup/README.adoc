@@ -1,4 +1,4 @@
-= ACME Incident Workshop — Cluster Setup
+= Cluster Setup
 
 Run these scripts as *cluster-admin* before delivering the OpenShift Security Roadshow ACS modules with end-of-module incident exercises.
 
@@ -79,17 +79,26 @@ Attendees use the Showroom attribute `{workshop_user_suffix}` matching their ass
 
 == Attendee lab environment (bastion)
 
-Attendees clone `ocp5-rhacs-showroom`, then run `setup/lab-environment.sh`. Cluster-wide RHACS, Compliance Operator, collector networking, Central settings, and demo-apps are already synced by OpenShift GitOps. The bastion script configures the RHACS CLI token and builds/pushes Quay images:
+Attendees clone `ocp5-rhacs-showroom`, then run `setup/lab-environment.sh`. OpenShift GitOps already syncs RHACS, Quay (including the public MinIO image and the private workshop images), the Central Quay integration, Compliance Operator, collector networking, demo-apps, the MCP servers, and OpenShift Lightspeed. Lightspeed is preconfigured with the platform model. The bastion script reads Quay and RHACS credentials into `~/.bashrc`, creates a Quay account token (`QUAY_TOKEN`), and installs `cosign`, `oc-mirror`, `ec`, and `mvn`.
+
+Patient-portal is not part of that init. ACS module 1 makes the Quay repositories public, then runs `--deploy-skupper-only`.
 
 [source,bash]
 ----
 git clone https://github.com/rhpds/ocp5-rhacs-showroom.git
 cd ocp5-rhacs-showroom
-bash setup/lab-environment.sh --quay-user QUAYADMIN --quay-password 'password'
-bash setup/lab-environment.sh --deploy-skupper-only
+bash setup/lab-environment.sh
+source ~/.bashrc
 ----
 
 Use `--rhacs-configure` or `--apply-demo-apps` only on brownfield clusters that are not GitOps-managed.
+
+At the start of a hands-on module, `setup/lab-run.sh` runs that module's solution commands and prints a score such as `Grade: 6/8`. The numerator is how many steps finished. The denominator is the number of solution steps in the module. Run it once, before cleanup. Cleanup is still separate and does not grade.
+
+[source,bash]
+----
+bash setup/lab-run.sh --module 101-01
+----
 
 Attendees record module completion by running `setup/lab-cleanup.sh` at the end of each module (documented as a routine cleanup step). Each successful cleanup writes a marker line to `~/.acs-roadshow/progress` on the bastion for instructor verification / gameify scoring:
 
@@ -116,6 +125,20 @@ python3 main.py --csv bastions.csv
 # optional subset (default scores the full catalog):
 python3 main.py --csv bastions.csv --modules 101-01,101-02,00
 ----
+
+== Update running environments
+
+From an RHDP SSH export (`guid,hostname,port,username,password,ssh_command`), refresh the Showroom guide or re-run bastion setup on every environment. See `updates/README.md`. Do not commit the credential CSV.
+
+[source,bash]
+----
+cd updates
+python3 -m pip install -r requirements.txt
+python3 refresh_showroom.py --csv /path/to/ssh_access.csv
+python3 configure_environments.py --csv /path/to/ssh_access.csv
+----
+
+`refresh_showroom.py` restarts the Showroom deployment so its init container reclones the configured git ref. `configure_environments.py` fast-forwards `~/ocp5-rhacs-showroom` on each bastion and runs `setup/lab-environment.sh`, then reports whether that environment is up to date and configured.
 
 == Optional cluster theming
 

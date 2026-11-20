@@ -3,6 +3,7 @@
 :skills: DataVolume Clone RBAC, Shareable Disks, errorPolicy
 :labid: LAB-VIRT-05
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~25 minutes
@@ -17,24 +18,24 @@ A clone across namespaces is a data copy the destination owners did not take fro
 
 == What does it solve
 
-* Project A cloning Project B's gold image (and whatever secrets landed on that volume)
+* Project A cloning Project B's gold image and whatever secrets landed on that volume
 * Two VMs writing the same disk without SCSI reservations or a clustered FS (see also virt-01 `persistentReservation`)
 * Windows clustered FS needing `report`, vs a lab that set `ignore` to quiet logs
 
 == Your Mission
-Find RoleBindings that grant DataVolume clone across namespaces, list VMs with `shareable: true`, and list VMs with `errorPolicy: ignore`. Expect empty on a fresh lab. Do not patch `rhel-webserver`.
+Find RoleBindings that grant DataVolume clone across namespaces, list VMs with `shareable: true`, and list VMs with `errorPolicy: ignore`. Expect empty on a fresh lab. Do not patch `rhel9-vm`.
 
 === Prerequisites
 
 * xref:virt-04-vm-configuration.adoc[virt-04] complete
-* `jq` on the bastion
 * Permission to get RoleBindings, ClusterRoles, and VirtualMachines
 
-Click each step only if you need a hint.
+Click each step for the full solution.
 
-=== Control: Restrict access to cross-namespace DataVolume cloning
+:lab-run-module: virt-05
+include::partial$lab-run.adoc[]
 
-**Level:** 1
+=== Control: Restrict access to cross-namespace DataVolume cloning (Level 1 Control)
 
 CDI allows a DataVolume in namespace D to clone from namespace S only when S contains a RoleBinding whose subject is a ServiceAccount in D and whose role includes `datavolumes/source`.
 
@@ -44,56 +45,61 @@ CDI allows a DataVolume in namespace D to clone from namespace S only when S con
 
 *Default:* Only cluster administrators can arrange cross-namespace clones. There is no such RoleBinding until someone creates it.
 
-.Audit clone RoleBindings
+.List ClusterRoles and Roles whose rules are only datavolumes/source, then list cross-namespace clone bindings of those roles to a ServiceAccount. Expect Cross-namespace clone bindings: none. cdi.kubevirt.io:clone-sourcer on the first list is normal. A hit looks like gold/clone-to-app role=cdi.kubevirt.io:clone-sourcer subject=app/default
 [%collapsible]
 ====
-Look for ClusterRoles that mention `datavolumes/source`, then RoleBindings that use them.
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc get clusterrole,role -A -o json | jq -r '
+  [.items[]
+   | select(any(.rules[]?; any(.resources[]?; . == "datavolumes/source")))
+   | select(all(.rules[]?; (.resources | length) > 0 and all(.resources[]?; . == "datavolumes/source")))
+   | .metadata.name] | unique | .[]
+'
+----
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-oc get clusterrole -o json | jq -r '
-  .items[]
-  | select(.rules[]? | .resources[]? == "datavolumes/source")
-  | .metadata.name
-'
-echo '--- rolebindings with a foreign-namespace SA subject ---'
-oc get rolebinding -A -o json | jq -c '
-  .items[]
-  | select(.subjects[]? | .kind == "ServiceAccount" and .namespace != null and .namespace != .metadata.namespace)
-  | {ns: .metadata.namespace, name: .metadata.name, role: .roleRef.name, subjects}
-'
+echo 'Cross-namespace clone bindings:'
+LINES=""
+if [[ -n "${ROLES}" ]]; then
+  ROLE_JSON="$(printf '%s\n' ${ROLES} | jq -R . | jq -sc .)"
+  LINES="$(oc get rolebinding,clusterrolebinding -A -o json | jq -r --argjson roles "${ROLE_JSON}" '
+    .items[]
+    | . as $b
+    | select($roles | index($b.roleRef.name))
+    | .subjects[]?
+    | select(.kind == "ServiceAccount" and .namespace != null and .namespace != ($b.metadata.namespace // ""))
+    | "\($b.metadata.namespace // "cluster")/\($b.metadata.name)  role=\($b.roleRef.name)  subject=\(.namespace)/\(.name)"
+  ')"
+fi
+if [[ -z "${LINES}" ]]; then
+  echo '  none'
+else
+  printf '%s\n' "${LINES}"
+fi
 ----
-
-TIP: Zero ClusterRoles (or only ones you documented) plus no foreign-SA RoleBindings is a pass. A binding from `src-ns` to `default` in `dst-ns` with role `datavolume-cloner` is the textbook finding from the guide.
 ====
 
-.Inspect a known cloner ClusterRole (if it exists)
+.Get ClusterRole datavolume-cloner. Expect No datavolume-cloner ClusterRole (typical on a default install), or rules that are only the clone API
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get clusterrole datavolume-cloner -o yaml 2>/dev/null || echo "No datavolume-cloner ClusterRole (typical on a default install)"
 ----
-
-TIP: If the ClusterRole exists, its `rules` should be the clone API only, and RoleBindings that use it should be rare and named.
 ====
 
-.Remediation
+.Delete RoleBinding BINDING in SOURCE_NAMESPACE when it grants an unintended cross-namespace datavolumes/source clone. Leave CDI operator Roles. Expect Cross-namespace clone bindings: none
 [%collapsible]
 ====
-Delete RoleBindings that grant unintended cross-namespace clone. Do not delete CDI operator Roles.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 # oc delete rolebinding BINDING -n SOURCE_NAMESPACE
 ----
-
-TIP: Re-run the foreign-SA `jq`. The extra binding should be gone. See link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/virtualization/virt-cloning-a-datavolume[OpenShift Virtualization DataVolume cloning^] for the supported grant procedure when clone *is* required.
 ====
 
-=== Control: Disable shareable disks
-
-**Level:** 1
+=== Control: Disable shareable disks (Level 1 Control)
 
 `shareable: true` on a disk lets more than one VM attach it. That is valid only with a clustered filesystem or a distributed application that understands shared block.
 
@@ -103,7 +109,7 @@ TIP: Re-run the foreign-SA `jq`. The extra binding should be gone. See link:http
 
 *Default:* Shareable is off. The VM list should be empty.
 
-.Audit shareable disks
+.List VirtualMachines with a disk shareable true, then show name and shareable on disks of vm rhel9-vm in rhacs-virt. Expect the list empty, and rhel9-vm shareable null or false
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -113,32 +119,28 @@ oc get vm -A -o json | jq -r '
   | select([.spec.template.spec.domain.devices.disks[]? | select(.shareable == true)] | length > 0)
   | .metadata.namespace + "/" + .metadata.name
 '
-oc get vm rhel-webserver -n rhel-webserver -o json | jq '
+----
+
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc get vm rhel9-vm -n rhacs-virt -o json | jq '
   [.spec.template.spec.domain.devices.disks[]? | {name, shareable}]
 '
 ----
-
-TIP: First command empty. Second command: disks with `shareable` null or `false`.
 ====
 
-.Remediation
+.Remove disks/0/shareable from VirtualMachine VM_NAME in NAMESPACE. Leave vm rhel9-vm in rhacs-virt unchanged. Expect that VM to leave the list
 [%collapsible]
 ====
-Remove the flag on disk index 0 of a VM you own (not `rhel-webserver`):
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 # oc patch vm VM_NAME -n NAMESPACE --type='json' -p='[
 #   {"op": "remove", "path": "/spec/template/spec/domain/devices/disks/0/shareable"}
 # ]'
 ----
-
-TIP: Re-run the cluster `jq`. The VM should drop off the list.
 ====
 
-=== Control: Make sure errorPolicy is not ignore
-
-**Level:** 1
+=== Control: Make sure errorPolicy is not ignore (Level 1 Control)
 
 Disk `errorPolicy` decides what happens on a failed read/write. `ignore` continues as if the I/O succeeded. `stop` (default) pauses the VM. `report` surfaces the error to the guest (needed for some Windows clustered filesystems).
 
@@ -148,7 +150,7 @@ Disk `errorPolicy` decides what happens on a failed read/write. `ignore` continu
 
 *Default:* Unset, which means `stop`. The ignore-list should be empty.
 
-.Audit errorPolicy ignore
+.List VirtualMachines with a disk errorPolicy ignore, then show name and errorPolicy on disks of vm rhel9-vm in rhacs-virt. Expect the list empty, and rhel9-vm errorPolicy null, stop, or report, never ignore
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -158,27 +160,25 @@ oc get vm -A -o json | jq -r '
   | select([.spec.template.spec.domain.devices.disks[]? | select(.errorPolicy == "ignore")] | length > 0)
   | .metadata.namespace + "/" + .metadata.name
 '
-oc get vm rhel-webserver -n rhel-webserver -o json | jq '
+----
+
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+oc get vm rhel9-vm -n rhacs-virt -o json | jq '
   [.spec.template.spec.domain.devices.disks[]? | {name, errorPolicy}]
 '
 ----
-
-TIP: First command empty. Second: `errorPolicy` null or `stop`/`report`, never `ignore`.
 ====
 
-.Remediation
+.Remove disks/0/errorPolicy from VirtualMachine VM_NAME in NAMESPACE so the disk reverts to stop. Expect that VM to leave the ignore list. Use report when a Windows clustered filesystem needs it
 [%collapsible]
 ====
-Remove a bad policy (revert to default `stop`) or set `report` when Windows clustered FS needs it.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 # oc patch vm VM_NAME -n NAMESPACE --type='json' -p='[
 #   {"op": "remove", "path": "/spec/template/spec/domain/devices/disks/0/errorPolicy"}
 # ]'
 ----
-
-TIP: The VM should leave the ignore-list. Prefer `report` over `ignore` for clustered Windows disks; do not use `ignore` as the fleet default.
 ====
 
 == Debrief
@@ -195,7 +195,7 @@ NOTE: Next is xref:virt-06-network-segmentation.adoc[virt-06] -- VLANs, MAC spoo
 
 == Cleanup
 
-Progress only. DataVolumes and `rhel-webserver` stay.
+Progress only. DataVolumes and `rhel9-vm` stay.
 
 :lab-cleanup-module: virt-05
 include::partial$lab-cleanup.adoc[]

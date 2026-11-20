@@ -1,0 +1,30 @@
+= OpenShift Security Response
+:toc:
+:icons: font
+
+xref:ROOT:index.adoc[← Back to HOME]
+
+This track follows Sarah, a platform engineer at ACME Financial Services, through one incident and the controls the team puts in place afterward. You will trace a compromised CI/CD credential, isolate the workload, keep a forensic checkpoint, roll a hardened image, and lock RHACS process baselines.
+
+The shortened ACME exercises at the end of the Advanced Cluster Security modules stay where they are. This path is the full workshop, on its own URL under `security-response`.
+
+Adapted from James Blair's link:https://github.com/jmhbnz/workshops[OpenShift security response workshop^] (`data/security-new`). Those pages are GPL-3.0. Attribution and the license boundary are in `content/modules/security-response/NOTICE.adoc` in this repository.
+
+== How to use this track
+
+* Credentials and console links are on the xref:ROOT:index.adoc[roadshow home page]. Sign in there. This track does not use a separate registration app.
+* Run commands in the *Terminal* tab. `oc` is already logged in after the home page setup script.
+* Your namespaces are `payment-gateway-{workshop_user_suffix}` and `vulnerable-workload-{workshop_user_suffix}`.
+* RHACS API calls use `ROX_CENTRAL_ADDRESS` and `ROX_API_TOKEN` from `~/.acs-roadshow/env`.
+
+If those namespaces have no pods, a cluster admin runs `./setup/deploy-incident-env.sh` from this repository. See `setup/README.adoc`.
+
+== Exercises
+
+. xref:sr-01-environment.adoc[1. Workshop environment]
+. xref:sr-02-incident.adoc[2. The incident]
+. xref:sr-03-forensics.adoc[3. Forensic investigation]
+. xref:sr-04-harden-workload.adoc[4. Harden the workload]
+. xref:sr-05-process-baseline.adoc[5. Process baselining]
+
+When you finish, xref:ROOT:index.adoc[return to the roadshow home page].

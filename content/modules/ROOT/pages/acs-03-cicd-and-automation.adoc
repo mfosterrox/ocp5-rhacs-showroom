@@ -1,5 +1,6 @@
 = CI/CD and Automation
 :toc:
+:toclevels: 1
 :sectnums:
 :icons: font
 
@@ -67,7 +68,7 @@ link:https://github.com/mfosterrox/skupper-security-demo/tree/main/PaC-custom-po
 . In the Template tab, select *Git Repository* and enter the URL of the GitHub repository containing the custom policies - URL: https://github.com/mfosterrox/skupper-security-demo.git:
 . Select "Main":
 . Select "PaC-custom-policies":
-. Enter the remote namespace of "stackrox":
+. Enter the remote namespace of "rhacs-operator":
 
 image::05-acm-05.png[link=self, window=blank, width=100%]
 
@@ -100,7 +101,7 @@ Let's run the check again to check if the policies were successful.
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-roxctl -e $ROX_CENTRAL_ADDRESS:443 image check --image $QUAY_URL/$QUAY_USER/frontend:0.1
+roxctl -e $ROX_CENTRAL_ADDRESS:443 image check --image {quay_url}/{quay_user}/frontend:0.1
 ----
 
 *Expected:* Failing APK and GitOps-managed policies. If you created *Alpine Linux Package Manager in Image - Enforce Deploy* in xref:acs-02-policy-and-risk.adoc[02 Policy and Risk], it appears here as well.
@@ -187,7 +188,7 @@ This pipeline works by taking an image that you have created and passing it thro
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-echo $QUAY_URL/$QUAY_USER/frontend:0.1
+echo {quay_url}/{quay_user}/frontend:0.1
 ----
 
 image::05-cd-06.png[link=self, window=blank, width=100%]
@@ -285,17 +286,18 @@ I'm querying control-plane audit logs for exec events in our namespace. Morgan n
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Switch to your payment gateway namespace
+.Switch to project payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
-include::partial$payment-gateway-namespace.adoc[]
+[source,sh,subs="attributes",role=execute]
+----
+oc project payment-gateway-{workshop_user_suffix}
+----
 ====
 
-.Step 2 — Search audit logs for the compromised exec
+.On nodes with label node-role.kubernetes.io/master, search kube-apiserver/audit.log for the current project, objectRef.name payment-gateway, verb create, and subresource exec
 [%collapsible]
 ====
-Search audit logs on control plane nodes for the compromised exec:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 namespace=$(oc project --short)
@@ -311,15 +313,13 @@ done
 ----
 ====
 
-.Step 3 — Interpret the audit log output
+.Expect user.username system:serviceaccount:payment-gateway-{workshop_user_suffix}:cicd-pipeline-runner-sa, requestURI with SHADOW_PIVOT and /tmp/.hidden_toolkit/exfil.sh, and responseStatus.code 101
 [%collapsible]
 ====
-Review the output. Key fields to identify:
-
-* `user.username` — should be `system:serviceaccount:payment-gateway-{workshop_user_suffix}:cicd-pipeline-runner-sa`
-* `requestURI` — URL-encoded payload with `SHADOW_PIVOT`, `/tmp/.hidden_toolkit/exfil.sh`
-* `responseStatus.code` — `101` (WebSocket upgrade = successful exec)
-* `annotations` — RBAC binding that allowed the exec
+* `user.username`: `system:serviceaccount:payment-gateway-{workshop_user_suffix}:cicd-pipeline-runner-sa`
+* `requestURI`: URL-encoded payload with `SHADOW_PIVOT` and `/tmp/.hidden_toolkit/exfil.sh`
+* `responseStatus.code`: `101` (WebSocket upgrade means a successful exec)
+* `annotations`: the RBAC binding that allowed the exec
 
 image::fsi-security/sarah-call.png[Incident investigation,link=self, window=blank, width=100%]
 ====

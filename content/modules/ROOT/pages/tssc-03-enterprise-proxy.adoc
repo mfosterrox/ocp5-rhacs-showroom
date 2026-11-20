@@ -1,7 +1,7 @@
-= 2.1 Enterprise proxy
+= 2.1 Enterprise Proxy
 :source-highlighter: rouge
 :toc:
-:toclevels: 2
+:toclevels: 1
 
 == Overview
 
@@ -46,29 +46,104 @@ Do *not* copy v1 `module-02-direct-vs-proxy.png` (different framing). The diagra
 
 == Discover Nexus (do not invent the host)
 
-.Userinfo: Nexus URL and channel names
+. Userinfo: Nexus URL and channel names
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo \
   -o jsonpath='nexus={.data.nexus_url}{"\n"}validated={.data.channel_validated}{"\n"}remediated={.data.channel_remediated}{"\n"}mode={.data.lightwell_repo_mode}{"\n"}'
 ----
++
+Expected output:
++
+----
+nexus=https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io
+validated=lightwell-java-validated
+remediated=lightwell-java-remediated
+mode=seeded
+----
 
 ConfigMap `lightwell-maven-settings` is a *reference* (repo ids and URLs). Copying it into `stub-03-enterprise-proxy` is not the Your change — complete the incomplete stub.
 
-.Peek at the reference (ids and URLs only)
+. Peek at the reference (ids and URLs only)
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo get configmap lightwell-maven-settings \
   -o jsonpath='{.data.settings\.xml}' | head -60
 ----
++
+Expected output:
++
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+  <!--
+    Learner UX: mvn -s settings.xml -Plightwell-validated clean verify
+                mvn -s settings.xml -Plightwell-remediated clean verify
+    Proxied PoV: point mirrors at https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/libs-release/
+    Direct LWN: profiles can also target packages.redhat.com with LW_* auth (not committed).
+  -->
+  <profiles>
+    <profile>
+      <id>lightwell-validated</id>
+      <repositories>
+        <repository>
+          <id>lightwell-java-validated</id>
+          <name>Lightwell Java Validated</name>
+          <url>https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/lightwell-java-validated/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>lightwell-java-validated</id>
+          <url>https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/lightwell-java-validated/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+    <profile>
+      <id>lightwell-remediated</id>
+      <repositories>
+        <repository>
+          <id>lightwell-java-remediated</id>
+          <name>Lightwell Java Remediated (.rhlw-0000X)</name>
+          <url>https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/lightwell-java-remediated/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>lightwell-java-remediated</id>
+          <url>https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/lightwell-java-remediated/</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>false</enabled></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+  <activeProfiles>
+    <!-- Default to validated for active development; switch to remediated for prod pins -->
+    <activeProfile>lightwell-validated</activeProfile>
+  </activeProfiles>
+</settings>
+----
 
-Showroom home may not be writable for the Maven local repo. Use `/tmp`:
-
+. Showroom home may not be writable for the Maven local repo. Use `/tmp`
++
 [source,bash,role=execute]
 ----
 export MVN_LOCAL='-Dmaven.repo.local=/tmp/m2'
 mkdir -p /tmp/m2
 ----
++
+Expected output: no output. `/tmp/m2` exists afterward.
 
 [NOTE]
 ====
@@ -104,12 +179,15 @@ Fake host and repo id. If your scored `settings.xml` still uses this URL, the Ch
 
 The scored object is ConfigMap `stub-03-enterprise-proxy` in `lightwell-repo`. Extract it, replace every `REPLACE_ME_*` with values from userinfo (`nexus_url` plus `channel_validated` / `channel_remediated`), then write it back. Do not leave Maven Central as the only remote for the Lightwell profiles. Do not paste the `nexus.example.invalid` worked example.
 
-.Extract the incomplete seed
+. Extract the incomplete seed
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo get configmap stub-03-enterprise-proxy \
   -o jsonpath='{.data.settings\.xml}' > ~/track-2-1-settings.xml
 ----
++
+Expected output: no output. The file is `~/track-2-1-settings.xml`.
 
 The seed looks like this (placeholders fail):
 
@@ -149,45 +227,72 @@ The seed looks like this (placeholders fail):
 </settings>
 ----
 
-.Write settings back to the ConfigMap
+. Write settings back to the ConfigMap
++
 [source,bash,role=execute]
 ----
+NEXUS="$(oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo -o jsonpath='{.data.nexus_url}')"
+VALIDATED="$(oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo -o jsonpath='{.data.channel_validated}')"
+REMEDIATED="$(oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo -o jsonpath='{.data.channel_remediated}')"
+sed -i \
+  -e "s|REPLACE_ME_NEXUS_URL|${NEXUS}|g" \
+  -e "s|REPLACE_ME_CHANNEL_VALIDATED|${VALIDATED}|g" \
+  -e "s|REPLACE_ME_CHANNEL_REMEDIATED|${REMEDIATED}|g" \
+  ~/track-2-1-settings.xml
 oc -n lightwell-repo create configmap stub-03-enterprise-proxy \
   --from-file=settings.xml=$HOME/track-2-1-settings.xml \
   --dry-run=client -o yaml | oc apply -f -
 grep -E 'REPLACE_ME' ~/track-2-1-settings.xml && echo 'STILL HAS PLACEHOLDERS' || echo 'placeholders gone'
 ----
++
+Expected output:
++
+----
+configmap/stub-03-enterprise-proxy
+placeholders gone
+----
 
 == Check: Maven resolve from Nexus
 
-Resolve *Validated* `commons-lang3:3.14.0` (upstream line — not the `.rhlw-*` pin). The log must show your Nexus host, not `repo.maven.apache.org` as the source of that GAV.
-
+. Resolve *Validated* `commons-lang3:3.14.0` (upstream line — not the `.rhlw-*` pin). The log must show your Nexus host, not `repo.maven.apache.org` as the source of that GAV.
++
 [source,bash,role=execute]
 ----
+export MVN_LOCAL='-Dmaven.repo.local=/tmp/m2'
+rm -rf /tmp/m2/org/apache/commons/commons-lang3
 mvn -s ~/track-2-1-settings.xml ${MVN_LOCAL} -Plightwell-validated \
   org.apache.maven.plugins:maven-dependency-plugin:3.7.0:get \
   -Dartifact=org.apache.commons:commons-lang3:3.14.0
 ----
++
+Maven still downloads the dependency plugin from Maven Central. The `commons-lang3` jar comes from Nexus.
++
+Expected output:
++
+----
+Downloaded from lightwell-java-validated: https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/lightwell-java-validated/org/apache/commons/commons-lang3/3.14.0/commons-lang3-3.14.0.jar
+[INFO] BUILD SUCCESS
+----
 
-:report-name: report-03-enterprise-proxy
-:report-key: proxy_standin
-:report-token: nexus-stand-in
-include::partial$validate-job-report.adoc[]
-
-:validate-job: validate-03-enterprise-proxy
-:validate-job-template: job-03.yaml
-include::partial$validate-job-rerun.adoc[]
-
-Honor system: later modules still open if you skip this. The Validate Job grades the ConfigMap (Nexus host, no `REPLACE_ME`, not the worked-example URL). The `~/track-2-1-settings.xml` copy is for `mvn -s`.
+Honor system: later modules still open if you skip this. The ConfigMap must name your Nexus host, with no `REPLACE_ME` and not the worked-example URL. The `~/track-2-1-settings.xml` copy is for `mvn -s`.
 
 == Callout: pip.conf
 
-`pip.conf` is the analogue of `settings.xml`: `index-url` to Lightwell PyPI Validated (and a remediated file). ConfigMap `lightwell-pip-settings` shows the pattern. PEP 740 wheel attestations are the analogue of Maven GPG when the artifacts carry them — not this Check.
-
+. `pip.conf` is the analogue of `settings.xml`: `index-url` to Lightwell PyPI Validated (and a remediated file). ConfigMap `lightwell-pip-settings` shows the pattern. PEP 740 wheel attestations are the analogue of Maven GPG when the artifacts carry them — not this Check.
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo get configmap lightwell-pip-settings \
   -o jsonpath='{.data.pip\.conf}'
+----
++
+Expected output:
++
+----
+[global]
+index-url = https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/lightwell-python-validated/simple
+extra-index-url = https://pypi.org/simple
+trusted-host = nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io
 ----
 
 == Callout: Artifactory (not installed)

@@ -1,5 +1,6 @@
 = Compliance
 :toc:
+:toclevels: 1
 :sectnums:
 :icons: font
 
@@ -64,7 +65,7 @@ Since RHACS was installed prior to the Compliance Operator, we’ll need to rest
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-oc delete pods -l app.kubernetes.io/component=sensor -n stackrox
+oc delete pods -l app.kubernetes.io/component=sensor -n rhacs-operator
 ----
 
 With the Sensor restarted, kick off a compliance scan in ACS to see the updated results.
@@ -307,7 +308,7 @@ oc get networkpolicies -A -o json | jq '[.items[] | select((.metadata.namespace 
   "janus-argocd",
   "medical",
   "sonataflow-infra",
-  "stackrox",
+  "rhacs-operator",
   "trusted-profile-analyzer",
   "vault"
 ]
@@ -348,25 +349,25 @@ The pipeline service account had edit plus exec. Which compliance standards flag
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Review the compliance dashboard
+.In Compliance, review the cluster compliance dashboard
 [%collapsible]
 ====
 . In RHACS, open *Compliance* and review the cluster compliance dashboard.
 ====
 
-.Step 2 — Identify RBAC-related failing controls
+.Note the compliance percentage and failing controls for RBAC or access management
 [%collapsible]
 ====
 . Note the overall compliance percentage and any failing controls related to RBAC or access management.
 ====
 
-.Step 3 — Map the audit finding to compliance controls
+.Map Role container-executor, which granted pods/exec to cicd-pipeline-runner-sa, to the failing controls
 [%collapsible]
 ====
 . Cross-reference with the audit finding: the `container-executor` Role granted `pods/exec` to `cicd-pipeline-runner-sa`.
 ====
 
-.Step 4 — Discuss least-privilege gaps
+.Discuss excessive permissions on automation service accounts, separation of CI/CD deploy and runtime exec, and missing audit review for privileged subresource access
 [%collapsible]
 ====
 Discuss which controls would have flagged this before the breach:

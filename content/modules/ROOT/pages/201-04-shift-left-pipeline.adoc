@@ -3,6 +3,7 @@
 :skills: Tekton, Image Scanning, Signing, Admission Gating
 :labid: LAB-201-04
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~25 minutes
@@ -10,7 +11,7 @@
 == Overview
 Integrate security scanning and policy checks into pipelines.
 
-Build a Tekton pipeline that starts **FROM** the workshop golden Python base (`python-alpine-golden:0.1` in Quay — already pulled and pushed by `setup/lab-environment.sh`), then scans, gates, and signs the result and deploys by digest.
+Build a Tekton pipeline that starts **FROM** the workshop golden Python base (`python-alpine-golden:0.1` in Quay — already pushed by GitOps), then scans, gates, and signs the result and deploys by digest.
 
 == Why it matters
 Unsigned, unscanned images reach production when security sits after deploy. Pipelines that build, scan, gate, and sign shrink the window where attackers swap in a poisoned tag. Starting FROM an approved golden base — not `docker.io/python` at build time — is the other half of that story: the cluster only consumes a base you already scanned and parked in Quay.
@@ -29,87 +30,78 @@ Build a Tekton path FROM `python-alpine-golden` that refuses unscanned or unsign
 
 * OpenShift Pipelines (Tekton) Operator installed
 * Cosign installed locally, or simulate signing in the pipeline tasks
-* Lab setup already ran (`source ~/.bashrc` or `source ~/.acs-roadshow/env`): `QUAY_URL`, `QUAY_USER`, and the golden image `${QUAY_URL}/${QUAY_USER}/python-alpine-golden:0.1`
-* The `python-alpine-golden` repository is **public** in Quay (same Settings path as `frontend` in xref:acs-00-setup-install-navigation.adoc#navigating-the-registry[acs-00]) so the cluster can import it
+* Lab setup already ran. The golden image is `$QUAY_URL/$QUAY_USER/python-alpine-golden:0.1` from `~/.acs-roadshow/env`
+* The `python-alpine-golden` repository is **public** in Quay (same API call as `frontend` in xref:acs-00-setup-install-navigation.adoc#navigating-the-registry[acs-00]) so the cluster can import it
 
-Click each step only if you need a hint.
+Click each step for the full solution.
+
+:lab-run-module: 201-04
+include::partial$lab-run.adoc[]
+
+.Install podman with sudo dnf install -y podman. Expect the package installed, or already installed
+[%collapsible]
+====
+[source,bash,subs="+macros,+attributes",role=execute]
+----
+sudo dnf install -y podman
+----
+====
 
 .Create project 201-04-s-pipeline
 [%collapsible]
 ====
-Stay in this project for Tasks, Pipeline, and the digest deploy.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 201-04-s-pipeline
 ----
-
-TIP: `Now using project "201-04-s-pipeline"`.
 ====
 
-.Confirm the golden Python image
+.Source $HOME/.acs-roadshow/env, print $QUAY_URL/$QUAY_USER/python-alpine-golden:0.1, log in to $QUAY_URL as $QUAY_USER with $QUAY_PASSWORD and tls-verify false, then pull that image. Expect Login Succeeded
 [%collapsible]
 ====
-This is the approved base from setup — not Docker Hub at pipeline time. Pull proves the tag exists before you import it.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-source ~/.acs-roadshow/env 2>/dev/null || source ~/.bashrc
-echo "${QUAY_URL}/${QUAY_USER}/python-alpine-golden:0.1"
-podman pull "${QUAY_URL}/${QUAY_USER}/python-alpine-golden:0.1"
+source "${HOME}/.acs-roadshow/env"
+echo "$QUAY_URL/$QUAY_USER/python-alpine-golden:0.1"
+printf '%s' "$QUAY_PASSWORD" | podman login --tls-verify=false "$QUAY_URL" -u "$QUAY_USER" --password-stdin
+podman pull --tls-verify=false "$QUAY_URL/$QUAY_USER/python-alpine-golden:0.1"
 ----
-
-TIP: The pull should complete without `unauthorized` or `manifest unknown`. If `QUAY_URL` is empty, re-run lab setup or `source ~/.acs-roadshow/env`.
 ====
 
-.Import python-alpine-golden into this project
+.Source $HOME/.acs-roadshow/env, then import image python-alpine-golden:0.1 into 201-04-s-pipeline from $QUAY_URL/$QUAY_USER/python-alpine-golden:0.1 with confirm and insecure
 [%collapsible]
 ====
-Copy the golden image into the project ImageStream so the pipeline FROM line stays on-cluster.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
-source ~/.acs-roadshow/env 2>/dev/null || source ~/.bashrc
+source "${HOME}/.acs-roadshow/env"
 oc import-image python-alpine-golden:0.1 \
   --from="${QUAY_URL}/${QUAY_USER}/python-alpine-golden:0.1" \
   --confirm --insecure -n 201-04-s-pipeline
 ----
-
-TIP: `imagestreamtag.image.openshift.io/python-alpine-golden:0.1 imported`. If this fails with unauthorized, make the Quay repository public and retry.
 ====
 
-.Create ServiceAccount pipeline
+.Create ServiceAccount pipeline in 201-04-s-pipeline
 [%collapsible]
 ====
-Tekton runs as this SA. Do not reuse `default`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create sa pipeline -n 201-04-s-pipeline
 ----
-
-TIP: `serviceaccount/pipeline created`.
 ====
 
-.Grant anyuid and image-builder to SA pipeline
+.Grant SCC anyuid to service account pipeline in 201-04-s-pipeline, then grant role system:image-builder to that service account
 [%collapsible]
 ====
-Buildah often needs `anyuid`. `system:image-builder` lets the Task push `demo` to this project’s internal registry. Treat both as pipeline-only debt, not an app SCC.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc adm policy add-scc-to-user anyuid -z pipeline -n 201-04-s-pipeline
 oc policy add-role-to-user system:image-builder -z pipeline -n 201-04-s-pipeline
 ----
-
-TIP: Skip the SCC grant if your cluster already lets the pipeline SA build without it.
 ====
 
-.Apply Task build-image
+.Apply Task build-image in 201-04-s-pipeline with result image-digest, params IMAGE and BASE_IMAGE, step image registry.access.redhat.com/ubi9/buildah, USER 1001, port 8080, and /opt/app/index.html containing shift-left
 [%collapsible]
 ====
-The Task builds FROM the imported golden ImageStream, adds a non-root Python HTTP server, pushes, and writes an image digest result.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n 201-04-s-pipeline -f - <<'EOF'
@@ -144,15 +136,11 @@ spec:
       echo -n "$DIGEST" > $(results.image-digest.path)
 EOF
 ----
-
-TIP: `task.tekton.dev/build-image created`.
 ====
 
-.Apply Task scan-image
+.Apply Task scan-image in 201-04-s-pipeline with param IMAGE, result scan-status, and step image registry.access.redhat.com/ubi9/ubi, writing PASS unless FAIL=1
 [%collapsible]
 ====
-The scan is simulated. `FAIL=1` in the script is how you will fail the gate later.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n 201-04-s-pipeline -f - <<'EOF'
@@ -176,15 +164,11 @@ spec:
       echo -n PASS > $(results.scan-status.path)
 EOF
 ----
-
-TIP: `task.tekton.dev/scan-image created`.
 ====
 
-.Apply Task sign-image
+.Apply Task sign-image in 201-04-s-pipeline with params IMAGE and DIGEST, step image registry.access.redhat.com/ubi9/ubi, writing signature-ok to /tekton/home/signature.txt
 [%collapsible]
 ====
-Signing is simulated. Real clusters replace this step with cosign.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n 201-04-s-pipeline -f - <<'EOF'
@@ -205,15 +189,11 @@ spec:
       echo "signature-ok" > /tekton/home/signature.txt
 EOF
 ----
-
-TIP: `task.tekton.dev/sign-image created`.
 ====
 
-.Apply Pipeline secure-build
+.Apply Pipeline secure-build in 201-04-s-pipeline with params IMAGE and BASE_IMAGE and tasks build-image, scan-image, then sign-image only when scan-status is PASS
 [%collapsible]
 ====
-`when` on the sign task is the gate: scan result must be `PASS`. `BASE_IMAGE` is the golden Python ImageStream in this project.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n 201-04-s-pipeline -f - <<'EOF'
@@ -256,15 +236,11 @@ spec:
       value: $(tasks.build.results.image-digest)
 EOF
 ----
-
-TIP: `pipeline.tekton.dev/secure-build created`.
 ====
 
-.Apply PipelineRun secure-build-run
+.Apply PipelineRun secure-build-run in 201-04-s-pipeline as service account pipeline for Pipeline secure-build, IMAGE image-registry.openshift-image-registry.svc:5000/201-04-s-pipeline/demo:latest, and BASE_IMAGE image-registry.openshift-image-registry.svc:5000/201-04-s-pipeline/python-alpine-golden:0.1
 [%collapsible]
 ====
-Build FROM the imported golden tag. Push the app image to this project’s internal registry.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n 201-04-s-pipeline -f - <<'EOF'
@@ -283,54 +259,38 @@ spec:
     value: image-registry.openshift-image-registry.svc:5000/201-04-s-pipeline/python-alpine-golden:0.1
 EOF
 ----
-
-TIP: `pipelinerun.tekton.dev/secure-build-run created`.
 ====
 
-.Get PipelineRuns
+.Get PipelineRuns in 201-04-s-pipeline. Expect secure-build-run True or Succeeded
 [%collapsible]
 ====
-Wait until the run is not still `Unknown` / `Running`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get pipelineruns -n 201-04-s-pipeline
 ----
-
-TIP: `secure-build-run` should move to `True` / `Succeeded` if the scan passed.
 ====
 
-.Describe PipelineRun secure-build-run
+.Describe PipelineRun secure-build-run in 201-04-s-pipeline and show status lines. Expect Succeeded on the pipeline and the sign task
 [%collapsible]
 ====
-Confirm each task (build, scan, sign) completed.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc describe pipelinerun secure-build-run -n 201-04-s-pipeline | grep -i status
 ----
-
-TIP: Look for Succeeded on the pipeline and on the sign task.
 ====
 
-.Get pipelineResults from secure-build-run
+.Get status.pipelineResults for PipelineRun secure-build-run in 201-04-s-pipeline. Expect an image-digest value
 [%collapsible]
 ====
-Copy the digest. You will pin the Deployment to it.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get pipelinerun secure-build-run -n 201-04-s-pipeline -o jsonpath='{.status.pipelineResults}'
 ----
-
-TIP: You should see an image-digest value. If empty, check Task results on the build task.
 ====
 
-.Apply Deployment app pinned to the digest
+.Apply Deployment app in 201-04-s-pipeline with replicas 1, label app=demo, container web, and image `image-registry.openshift-image-registry.svc:5000/201-04-s-pipeline/demo@sha256:<DIGEST>`
 [%collapsible]
 ====
-Replace `<DIGEST>` with the sha256 from the previous step. Do not deploy `:latest`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n 201-04-s-pipeline -f - <<'EOF'
@@ -351,8 +311,6 @@ spec:
         image: image-registry.openshift-image-registry.svc:5000/201-04-s-pipeline/demo@sha256:<DIGEST>
 EOF
 ----
-
-TIP: `deployment.apps/app created`. Image must contain `@sha256:`.
 ====
 
 == Failure Simulation

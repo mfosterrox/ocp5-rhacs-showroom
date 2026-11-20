@@ -1,13 +1,13 @@
-= 3.1 Golden-path source
+= 3.1 Golden-Path Source
 :source-highlighter: rouge
 :toc:
-:toclevels: 2
+:toclevels: 1
 
 == Overview
 
 Application source must live on in-cluster Gitea in organization `lw-student`. It must not live on GitHub. It must not stay under `workshop-templates`. The scored remote is `lw-student/spring-boot-lw-poc` (`student_repo_url`).
 
-The scored path is the seed script. That script also adds `renovate-bot`, which xref:tssc-07-live-renovate.adoc[3.3] requires. Red Hat Developer Hub (RHDH) `lightwell-java-service` is an optional golden path, not this Check.
+The cluster seed already created `lw-student` and the three repositories. This Check scores that remote. `renovate-bot` is added as a collaborator for xref:tssc-07-live-renovate.adoc[3.3]. Red Hat Developer Hub (RHDH) `lightwell-java-service` is an optional golden path, not this Check.
 
 Do not change `Dockerfile` `FROM` here. That is xref:tssc-06-bind-base-deps.adoc[3.2]. Do not merge a fake Renovate PR. That is xref:tssc-07-live-renovate.adoc[3.3].
 
@@ -32,15 +32,30 @@ image::gitea-templates-vs-learner-org.png[workshop-templates versus your lw-stud
 
 == Discover Gitea (never paste a hostname from this page)
 
+. Discover Gitea (never paste a hostname from this page)
++
 [source,bash,role=execute]
 ----
 oc -n gitea get configmap demo-userinfo-gitea \
   -o jsonpath='gitea_url={.data.gitea_url}{"\n"}user={.data.student_username}{"\n"}org={.data.student_gitea_org}{"\n"}app={.data.student_repo_url}{"\n"}templates={.data.template_app_repo_url}{"\n"}password={.data.student_password}{"\n"}'
 ----
++
+The password line prints the ConfigMap value. Do not copy it into Git or this page.
++
+Expected output:
++
+----
+gitea_url=https://gitea.apps.cluster-wprcr.dyn.redhatworkshops.io
+user=student
+org=lw-student
+app=https://gitea.apps.cluster-wprcr.dyn.redhatworkshops.io/lw-student/spring-boot-lw-poc.git
+templates=https://gitea.apps.cluster-wprcr.dyn.redhatworkshops.io/workshop-templates/spring-boot-lw-poc.git
+----
 
 Expect user `student` and org `lw-student`. The Gitea password is the *value* of ConfigMap key `student_password` (not the key name). Do not put that value in Git or a screenshot.
 
-.Ensure the Gitea user can sign in (no-op if the seed Job already created the account)
+. Ensure the Gitea user can sign in (no-op if the seed Job already created the account)
++
 [source,bash,role=execute]
 ----
 export STUDENT_USER=student
@@ -52,13 +67,23 @@ oc -n gitea get configmap gitea-student-repo-seed \
 chmod +x /tmp/learner-ensure-gitea-user.sh
 /tmp/learner-ensure-gitea-user.sh
 ----
++
+Expected output:
++
+----
+Gitea URL:     https://gitea.apps.cluster-wprcr.dyn.redhatworkshops.io
+Student user:  student
+OK: student can already sign in.
+Open: https://gitea.apps.cluster-wprcr.dyn.redhatworkshops.io
+Sign in as: student  (password: value of demo-userinfo-gitea key student_password)
+----
 
 Open `gitea_url` and sign in as `student` with the password value from that ConfigMap.
 
 == Worked example (not the Check)
 
-GitHub or the operator template org. If `student_repo_url` still points here, the Check fails.
-
+. GitHub or the operator template org. If `student_repo_url` still points here, the Check fails.
++
 [source,bash]
 ----
 # Worked example ONLY — not the scored remote.
@@ -66,20 +91,17 @@ git clone https://github.com/example/spring-boot-lw-poc.git
 # or: git clone <template_app_repo_url>   # workshop-templates, not lw-student
 ----
 
-== Your change: org, empty repos, seed script
+== Your change: confirm the seeded remotes
 
-. In Gitea: *+* → *New Organization*. Name exactly `lw-student`. Visibility *Public* → *Create Organization*.
+The cluster seed already created organization `lw-student` and these repositories, with the template tree on `main`:
 
-// VISUAL: https://github.com/NA-FSI-Services/lightwell-tssc-workshop/issues/61
-image::gitea-new-org-lw-student.png[Gitea New Organization form with name lw-student,width=700,link=self,window=blank]
-
-. Under `lw-student`, create three *empty* repositories (do *not* initialize with a README):
-+
 * `spring-boot-lw-poc`
-* `gitops-spring-boot-lw-poc` (stage)
-* `gitops-prod-spring-boot-lw-poc` (prod)
+* `gitops-spring-boot-lw-poc` (stage, Application `lw-poc-staging`)
+* `gitops-prod-spring-boot-lw-poc` (prod, Application `lw-poc-prod`)
 
-. Seed from templates (adds `renovate-bot` as a write collaborator on the app repo):
+Do not create a second organization or empty repositories with the same names. Later modules commit on these remotes.
+
+If the Check below is not HTTP `200`, repair from templates (this also adds `renovate-bot` as a write collaborator on the app repo):
 
 [source,bash,role=execute]
 ----
@@ -95,6 +117,8 @@ chmod +x /tmp/learner-seed.sh
 
 == Check: your remote exists and is not the template org
 
+. Check: your remote exists and is not the template org
++
 [source,bash,role=execute]
 ----
 oc -n gitea get configmap demo-userinfo-gitea \
@@ -102,22 +126,21 @@ oc -n gitea get configmap demo-userinfo-gitea \
 curl -sk -o /dev/null -w "%{http_code}\n" \
   "$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_repo_url}')"
 ----
++
+Expected output:
++
+----
+https://gitea.apps.cluster-wprcr.dyn.redhatworkshops.io/lw-student/spring-boot-lw-poc.git
+https://gitea.apps.cluster-wprcr.dyn.redhatworkshops.io/workshop-templates/spring-boot-lw-poc.git
+200
+----
 
 Expect HTTP `200` on `student_repo_url`. Open `lw-student/spring-boot-lw-poc` and confirm `pom.xml` is at the repository *root*. Default `<commons.lang3.version>` is still the affected upstream `3.14.0` (not `3.18.0`, not yet `3.14.0.rhlw-00001`). `workshop-templates` is not the scored remote.
 
 // VISUAL: https://github.com/NA-FSI-Services/lightwell-tssc-workshop/issues/62
 image::gitea-seeded-app-root.png[Seeded lw-student spring-boot-lw-poc repository root showing pom.xml,width=700,link=self,window=blank]
 
-:report-name: report-05-golden-path-source
-:report-key: git_home
-:report-token: gitea-not-github
-include::partial$validate-job-report.adoc[]
-
-:validate-job: validate-05-golden-path-source
-:validate-job-template: job-05.yaml
-include::partial$validate-job-rerun.adoc[]
-
-Honor system: 3.2 still opens. The Validate Job grades the Gitea remotes, not a screenshot.
+Honor system: 3.2 still opens. The Gitea remotes are the check, not a screenshot.
 
 == Callout: RHDH (optional)
 

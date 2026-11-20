@@ -28,28 +28,23 @@ Broad SCC usage silently enables:
 == Your Mission
 Prove restricted-plus is not enough for this workload: apply a tighter SCC, run a good pod, then watch capability-add and root-UID pods fail.
 
-Click each step only if you need a hint.
+Click each step for the full solution.
 
-.Inspect SCC restricted
+:lab-run-module: 201-02
+include::partial$lab-run.adoc[]
+
+.Show the first 40 lines of SCC restricted. Expect allowPrivilegedContainer: false and a non-root runAsUser strategy
 [%collapsible]
 ====
-Know the baseline before you invent a custom SCC. Prefer restricted plus an image fix when that already fits.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get scc restricted -o yaml | head -n 40
 ----
-
-TIP: You should see `allowPrivilegedContainer: false` and a non-root `runAsUser` strategy.
 ====
 
-.Apply SCC hardened-nonroot
+.Apply SecurityContextConstraints hardened-nonroot with allowPrivilegedContainer false, host directory, IPC, network, PID, and ports false, requiredDropCapabilities ALL, runAsUser MustRunAsRange 1000660000 to 1000669999, fsGroup 1000660000 to 1000669999, seLinux level s0:c26,c30, seccomp runtime/default, and empty users and groups
 [%collapsible]
 ====
-This SCC drops all capabilities, forces a UID range, sets SELinux, and pins `runtime/default` seccomp. SCCs are cluster-scoped (they cannot live in a project), but an unbound SCC is inert: empty `users` and `groups` means admission will not pick it for OpenShift system pods or anyone else. The next bind step grants `use` only to this lab’s service accounts.
-
-Do not add `system:authenticated` or `system:serviceaccounts` to this object. That would make it eligible for every pod, including platform workloads.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<'EOF'
@@ -92,42 +87,30 @@ groups: []
 priority: 10
 EOF
 ----
-
-TIP: `securitycontextconstraints.security.openshift.io/hardened-nonroot created` (or configured). Platform namespaces keep their existing SCCs (`restricted-v2`, `privileged`, and so on).
 ====
 
 .Create project 201-02-w-harden
 [%collapsible]
 ====
-Stay in this project for the pod tests.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 201-02-w-harden
 ----
-
-TIP: `Now using project "201-02-w-harden"`.
 ====
 
-.Bind SCC hardened-nonroot to this project's service accounts
+.Grant SCC hardened-nonroot to group system:serviceaccounts:201-02-w-harden, then create RoleBinding default-edit in 201-02-w-harden granting ClusterRole edit to service account 201-02-w-harden:default
 [%collapsible]
 ====
-An SCC does nothing until identities can use it. This grant is `system:serviceaccounts:201-02-w-harden` only — not every service account in the cluster.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc adm policy add-scc-to-group hardened-nonroot system:serviceaccounts:201-02-w-harden
 oc create rolebinding default-edit --clusterrole=edit --serviceaccount=201-02-w-harden:default -n 201-02-w-harden || true
 ----
-
-TIP: The SCC is now available to SAs in `201-02-w-harden`. OpenShift pods in other namespaces are unchanged. `default-edit` lets that SA create pods for the deny tests without using your cluster-admin `privileged` SCC.
 ====
 
-.Apply pod good
+.Apply Pod good in 201-02-w-harden with image registry.access.redhat.com/ubi9/ubi, command id and sleep 1000, runAsUser 1000660001, fsGroup 1000660001, allowPrivilegeEscalation false, and annotation seccomp.security.alpha.kubernetes.io/pod=runtime/default
 [%collapsible]
 ====
-Match the SCC UID range and drop privilege escalation. This pod should Run.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n 201-02-w-harden -f - <<'EOF'
@@ -149,28 +132,20 @@ spec:
       allowPrivilegeEscalation: false
 EOF
 ----
-
-TIP: `pod/good created`.
 ====
 
-.Read the SCC annotation on pod good
+.Read annotation openshift.io/scc on Pod good in 201-02-w-harden. Expect hardened-nonroot
 [%collapsible]
 ====
-Confirm the scheduler actually used `hardened-nonroot`, not `restricted`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get pod good -n 201-02-w-harden -o jsonpath='{.metadata.annotations.openshift\.io/scc}{"\n"}'
 ----
-
-TIP: Output is `hardened-nonroot`.
 ====
 
-.Apply pod bad-cap with NET_RAW as the project SA
+.Create RoleBinding default-edit in 201-02-w-harden granting ClusterRole edit to service account 201-02-w-harden:default, delete Pod bad-cap, then apply Pod bad-cap as system:serviceaccount:201-02-w-harden:default with image registry.access.redhat.com/ubi9/ubi, command sleep 1000, and capabilities add NET_RAW. Expect Forbidden, NET_RAW is not allowed, and DENIED
 [%collapsible]
 ====
-Adding a capability the SCC does not allow is the attacker’s “just one more tool” request. Create as the project SA, not your bastion user. `lab-user` can use `privileged`, so the pod is admitted and you only see a PodSecurity *warning* — not an SCC deny.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create rolebinding default-edit --clusterrole=edit --serviceaccount=201-02-w-harden:default -n 201-02-w-harden || true
@@ -191,8 +166,6 @@ spec:
 EOF
 ----
 
-NOTE: `Forbidden` plus `DENIED` is the correct result. The long SCC provider list is normal; look for `NET_RAW` and `hardened-nonroot`.
-
 [source,text]
 ----
 Error from server (Forbidden): pods "bad-cap" is forbidden: unable to validate against any security context constraint: ... capabilities.add: Invalid value: "NET_RAW" ... provider "hardened-nonroot": ... NET_RAW is not allowed
@@ -200,11 +173,9 @@ DENIED
 ----
 ====
 
-.Apply pod bad-uid with runAsUser 0 as the project SA
+.Delete Pod bad-uid in 201-02-w-harden, then apply Pod bad-uid as system:serviceaccount:201-02-w-harden:default with image registry.access.redhat.com/ubi9/ubi, command sleep 1000, and runAsUser 0. Expect Forbidden, runAsUser 0 must be in the ranges, and DENIED
 [%collapsible]
 ====
-Root in the container is the privilege ladder from xref:101-04-scc-resource-guardrails.adoc[101-04]. This SCC’s UID range must reject it. Same impersonation as `bad-cap`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc delete pod bad-uid -n 201-02-w-harden --ignore-not-found
@@ -223,8 +194,6 @@ spec:
 EOF
 ----
 
-NOTE: `Forbidden` plus `DENIED` is the correct result. Look for `runAsUser: Invalid value: 0` and `must be in the ranges`.
-
 [source,text]
 ----
 Error from server (Forbidden): pods "bad-uid" is forbidden: unable to validate against any security context constraint: ... runAsUser: Invalid value: 0: must be in the ranges: [{1000660000 1000669999}] ...
@@ -232,17 +201,13 @@ DENIED
 ----
 ====
 
-.Exec unshare on pod good
+.Exec unshare -m true on Pod good. Expect unshare failed: Function not implemented and Blocked or not permitted (expected)
 [%collapsible]
 ====
-seccomp `runtime/default` should block a risky syscall such as `unshare`. Failure is the correct result.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec good -- unshare -m true || echo "Blocked or not permitted (expected)"
 ----
-
-NOTE: The command fails and the expected message prints.
 
 [source,text]
 ----

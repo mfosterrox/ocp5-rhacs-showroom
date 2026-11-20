@@ -1,5 +1,6 @@
 = Policy and Risk
 :toc:
+:toclevels: 1
 :sectnums:
 :icons: font
 
@@ -458,30 +459,33 @@ RHACS has been observing the payment gateway since the page. Let's review Proces
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Switch to your payment gateway namespace
+.Switch to project payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
-include::partial$payment-gateway-namespace.adoc[]
+[source,sh,subs="attributes",role=execute]
+----
+oc project payment-gateway-{workshop_user_suffix}
+----
 ====
 
-.Step 2 — Open payment-gateway in Risk
+.In Risk, open deployment payment-gateway in namespace payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
 . In RHACS, go to *Risk* and search for `payment-gateway`.
 . Open the deployment in namespace `payment-gateway-{workshop_user_suffix}`.
 ====
 
-.Step 3 — Review Process Discovery
+.Open the Process Discovery tab. Expect httpd workers and possibly /bin/bash or exfil.sh
 [%collapsible]
 ====
 . Select the *Process Discovery* tab.
 . Review the observed process baseline (should include `httpd` workers and possibly `/bin/bash` or `exfil.sh` from the simulated attack).
 ====
 
-.Step 4 — Note baseline lock state
+.Note whether the process baseline is unlocked
 [%collapsible]
 ====
-Note whether the baseline is *unlocked*—RHACS is still in its observation window and learning normal behavior.
+Note whether the baseline is *unlocked*. RHACS is still in its observation window and learning normal behavior.
 ====
 
 === What you learned

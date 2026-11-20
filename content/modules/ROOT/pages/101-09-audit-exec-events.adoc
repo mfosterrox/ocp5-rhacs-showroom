@@ -5,6 +5,7 @@
 :audit-evidence: "Listed control-plane audit paths; generated oc exec; extracted exec events with user, pod, namespace, and source IP."
 :cis-mitre-codes: '{"cisMapping":{"primary":["3.2.1","1.2.22"],"related":["1.2.23","1.2.24","1.2.25","3.2.2"]},"mitre":{"techniques":["T1543"],"tactics":["TA0003","TA0004"],"mitigations":["M1026","M1047"]}}'
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~20 minutes
@@ -27,16 +28,17 @@ Someone may already have exec’d into a pod. Your mission: know the log locatio
 
 Deeper correlation in Splunk (SIEM + ClusterLogForwarder) with RHACS is xref:201-06-audit-monitoring-correlation.adoc[201-06]. Compliance Operator scans are xref:101-10-security-compliance-addons.adoc[101-10].
 
-Click each step only if you need a hint.
+Click each step for the full solution.
+
+:lab-run-module: 101-09
+include::partial$lab-run.adoc[]
 
 === Part A: CIS controls and where the logs live
 OpenShift writes **three** API audit streams on every control plane node. `oc adm node-logs` reads them without SSH. You need permission to get `nodes/log` (`cluster-admin` or the roadshow `node-log-viewer` ClusterRole).
 
-.List kube-apiserver audit files on the masters
+.List kube-apiserver logs on nodes with role master, path kube-apiserver/, first 40 lines. Expect audit.log and rotated audit log files
 [%collapsible]
 ====
-On-disk paths are on the **control plane node**, not the bastion. The `oc adm` path argument is relative to `/var/log/`.
-
 [cols="1,2,2",options="header"]
 |===
 |What |On the node |How you read it from the bastion
@@ -62,20 +64,15 @@ On-disk paths are on the **control plane node**, not the bastion. The `oc adm` p
 |xref:201-06-audit-monitoring-correlation.adoc[201-06]
 |===
 
-List the kube-apiserver audit files that actually exist:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc adm node-logs --role=master --path=kube-apiserver/ | head -40
 ----
-TIP: You should see `audit.log` and rotated `audit-YYYY-…log` files. That is the CIS “audit log path is set” evidence.
 ====
 
-.Read kube-apiserver audit-log-path and CIS check names
+.Show kubeapiserver cluster audit-log-path, then list ComplianceCheckResults in openshift-compliance matching audit, 1.2.22, or 3.2. Expect the path, or no Compliance Operator results
 [%collapsible]
 ====
-Kubernetes CIS (kube-apiserver) is what this module maps to. OpenShift CIS (`ocp4-cis` in Compliance Operator) asks the same questions with OpenShift rule names.
-
 [cols="1,2,2",options="header"]
 |===
 |CIS Kubernetes |What an auditor asks |What “good” looks like here
@@ -105,8 +102,6 @@ Kubernetes CIS (kube-apiserver) is what this module maps to. OpenShift CIS (`ocp
 |`exec`, `portforward`, Secret access, and RBAC changes are logged
 |===
 
-Local files **rotate and age out**. CIS also expects you to *forward* them (SIEM / Cluster Logging). Disk on the master is not the archive.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get kubeapiserver cluster -o jsonpath='{.spec.observedConfig.apiServerArguments.audit-log-path}{"\n"}' 2>/dev/null || true
@@ -116,17 +111,14 @@ oc get kubeapiserver cluster -o jsonpath='{.spec.observedConfig.apiServerArgumen
 ----
 oc get compliancecheckresults.compliance.openshift.io -n openshift-compliance 2>/dev/null | grep -iE 'audit|1.2.22|3.2' | head || echo 'Compliance Operator results not in this cluster -- use the table above.'
 ----
-TIP: Treat any FAIL rows as a teaser. xref:101-10-security-compliance-addons.adoc[101-10] filters the audit-log rules and prints what to change.
 ====
 
 === Part B: Generate exec and hunt it
 Create a pod, exec into it, then search the Kubernetes API audit log. Metadata-level audit still records *who* and *which pod*; the command string is present only when the policy logs the request body.
 
-.Create project 101-09-a-audit and deploy audit-sleeper
+.Create project 101-09-a-audit or switch to it, create deployment audit-sleeper from registry.access.redhat.com/ubi9/ubi running sleep infinity, and wait for rollout within 90s. Expect Running
 [%collapsible]
 ====
-You need a running pod so the next step can `oc exec` into it.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 101-09-a-audit || oc project 101-09-a-audit
@@ -137,29 +129,21 @@ oc new-project 101-09-a-audit || oc project 101-09-a-audit
 oc create deployment audit-sleeper --image=registry.access.redhat.com/ubi9/ubi -- sleep infinity
 oc rollout status deployment/audit-sleeper --timeout=90s
 ----
-
-TIP: Rollout should complete. Pod `Running`.
 ====
 
-.Exec id and uname in audit-sleeper
+.Exec id and uname -n in deploy/audit-sleeper. Expect a UID and a hostname
 [%collapsible]
 ====
-These two execs are the events you will hunt in the audit log.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec deploy/audit-sleeper -- id
 oc exec deploy/audit-sleeper -- uname -n
 ----
-
-TIP: You should see a UID and a hostname. Give the log a few seconds to catch up before the next step.
 ====
 
-.Grep kube-apiserver audit.log for this namespace and exec
+.On the first master, wait 5s, grep kube-apiserver/audit.log for namespace 101-09-a-audit and "exec" or portforward, save /tmp/lab-101-09-audit.json, and count lines. Expect a count greater than 0
 [%collapsible]
 ====
-This reads `/var/log/kube-apiserver/audit.log` on the first control plane node. Give the exec a few seconds to land in the file. This is one pipeline; count greater than 0 means your exec is in the file.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 MASTER=$(oc get nodes -l node-role.kubernetes.io/master -o jsonpath='{.items[0].metadata.name}')
@@ -175,58 +159,43 @@ oc adm node-logs "${MASTER}" --path=kube-apiserver/audit.log \
   | tee /tmp/lab-101-09-audit.json \
   | wc -l
 ----
-
-TIP: Count greater than 0. If 0, wait and re-run, or try another master (`oc get nodes -l node-role.kubernetes.io/master`).
 ====
 
-.jq exec events from /tmp/lab-101-09-audit.json
+.Show exec events from /tmp/lab-101-09-audit.json with time, user, namespace, pod, verb, and sourceIPs, then grep "exec" if jq fails. Expect your user, namespace 101-09-a-audit, and pod audit-sleeper
 [%collapsible]
 ====
-Look for your user, namespace `101-09-a-audit`, and pod name `audit-sleeper-...`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 jq -c 'select(.objectRef.subresource=="exec") | {time:.requestReceivedTimestamp,user:.user.username,ns:.objectRef.namespace,pod:.objectRef.name,verb:.verb,sourceIPs:.sourceIPs}' /tmp/lab-101-09-audit.json
 ----
-Fallback if `jq` complains about concatenated objects:
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 grep -F '"exec"' /tmp/lab-101-09-audit.json | head
 ----
-
-Look for your user, namespace `101-09-a-audit`, and pod name `audit-sleeper-…`.
 ====
 
-.jq portforward events from the same file
+.Show portforward events from /tmp/lab-101-09-audit.json with time, user, namespace, and pod. Expect empty output
 [%collapsible]
 ====
-You did not open a port-forward. Empty output is a pass—this query is how you would catch a tunnel.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 jq -c 'select(.objectRef.subresource=="portforward") | {time:.requestReceivedTimestamp,user:.user.username,ns:.objectRef.namespace,pod:.objectRef.name}' /tmp/lab-101-09-audit.json || true
 ----
 ====
 
-.Count unique exec usernames in this slice
+.Count unique exec usernames in /tmp/lab-101-09-audit.json. Expect your user at least once
 [%collapsible]
 ====
-This is who appears as the actor on exec in the saved JSON.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 jq -r 'select(.objectRef.subresource=="exec") | .user.username' /tmp/lab-101-09-audit.json | sort | uniq -c
 ----
-
-TIP: Your current user should appear at least once.
 ====
 
-.Write the one-line incident summary
+.Write this incident line: At <time>, <user> from <sourceIP> exec'd into pod <pod> in namespace 101-09-a-audit
 [%collapsible]
 ====
-Fill this from the jq output: *who* (`user`), *what* (`exec` on which pod), *when* (`time`), *from where* (`sourceIPs`). That is the CIS-relevant evidence: sensitive API actions are recorded and attributable.
-
 [source,text]
 ----
 At <time>, <user> from <sourceIP> exec'd into pod <pod> in namespace 101-09-a-audit.

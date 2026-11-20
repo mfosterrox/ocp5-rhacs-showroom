@@ -1,7 +1,7 @@
-= 7.2 VEX blast radius + ACS
+= 7.2 VEX Blast Radius + ACS
 :source-highlighter: rouge
 :toc:
-:toclevels: 2
+:toclevels: 1
 
 == Overview
 
@@ -35,12 +35,27 @@ image::tssc-artifact-trust-chain.png[End-state trust chain: Hummingbird digest, 
 
 == Discover the scored VEX (not the spring-core sample)
 
+. Discover the scored VEX (not the spring-core sample)
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo \
   -o jsonpath='id={.data.scored_vex_id}{"\n"}gav={.data.scored_vex_gav}{"\n"}cdx={.data.scored_vex_maven_cdx}{"\n"}vex={.data.scored_vex_maven_vex}{"\n"}osv={.data.scored_vex_osv}{"\n"}csaf={.data.live_csaf_gate}{"\n"}'
 oc -n trusted-profile-analyzer get configmap rhtpa-ingestion-info \
   -o jsonpath='{.data.upload_hint}{"\n"}{.data.os_layer_callout}{"\n"}'
+----
++
+Expected output:
++
+----
+id=LW-DEMO-0002
+gav=org.apache.commons:commons-lang3:3.14.0.rhlw-00001
+cdx=https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/lightwell-java-remediated/org/apache/commons/commons-lang3/3.14.0.rhlw-00001/commons-lang3-3.14.0.rhlw-00001-cdx.json
+vex=https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/lightwell-java-remediated/org/apache/commons/commons-lang3/3.14.0.rhlw-00001/commons-lang3-3.14.0.rhlw-00001-vex.json
+osv=https://nexus-lightwell-repo.apps.cluster-wprcr.dyn.redhatworkshops.io/repository/lightwell-osv-java-remediated/osv/java/remediated/LW-DEMO-0002.json
+csaf=false
+Track 7 Check: pull CDX for org.apache.commons:commons-lang3:3.14.0.rhlw-00001 from Nexus (Maven classifier cdx) and POST /api/v3/sbom. Pull OSV LW-DEMO-0002.json and POST /api/v3/advisory. The Maven -vex.json classifier is OpenVEX — TPA rejects it as SBOM and as advisory (CSAF/CVE/OSV only). Do not enable redhat-csaf.
+Hummingbird / Red Hat CSAF is OS-layer VEX (layer map only). Python SPDX/VEX analogue is Track 8 text — no second GAV seed.
 ----
 
 * *Scored:* `LW-DEMO-0002` / `org.apache.commons:commons-lang3` / `3.14.0.rhlw-00001`
@@ -63,7 +78,7 @@ remediation: via-upstream
 . Download Maven classifier `cdx` from the userinfo URL (Nexus Remediated) and POST it to TPA `/api/v3/sbom`. The companion `-vex.json` classifier is **OpenVEX** — TPA does not accept OpenVEX as an SBOM or as `/api/v3/advisory` (that path is CSAF, CVE, or OSV only). Ingest the scored **OSV** document instead (`scored_vex_osv` / `LW-DEMO-0002.json`). Do not scrape CSAF. Do not POST OpenVEX to `/api/v3/sbom`.
 
 . Upload the CycloneDX file to `/api/v3/sbom` and the OSV file to `/api/v3/advisory` (same SoR as 7.1). Provision does *not* pre-ingest them. Keep `live_csaf_gate=false`.
-
++
 [source,bash,role=execute]
 ----
 CDX_URL="$(oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo -o jsonpath='{.data.scored_vex_maven_cdx}')"
@@ -90,6 +105,16 @@ curl -sk -X POST -H "Authorization: Bearer ${TOKEN}" \
   -w '\nOSV HTTP %{http_code}\n' \
   "${RHTPA_URL%/}/api/v3/advisory"
 ----
++
+Expected output:
++
+----
+CDX HTTP 201
+document_id":"LW-DEMO-0002"
+OSV HTTP 201
+----
+
+A second ingest returns new ids. HTTP 201 on both posts is the pass.
 
 // VISUAL: https://github.com/NA-FSI-Services/lightwell-tssc-workshop/issues/57
 image::tpa-gav-vex-ingested.png[TPA UI after ingesting GAV-bound VEX for LW-DEMO-0002,width=700,link=self,window=blank]
@@ -106,21 +131,141 @@ remediation: REPLACE_ME_VIA
 
 Fill with `LW-DEMO-0002`, the remediated GAV (include `3.14.0.rhlw-00001`), status `fixed` (or `not_affected` if the VEX statement uses that), and remediation `via-lightwell-pin`. Do *not* claim the upstream `3.14.0` is fixed. Do *not* use `LW-DEMO-0001`.
 
-.Extract the incomplete seed, then write it back after you fill the keys
+. Extract the incomplete seed, then write it back after you fill the keys
++
 [source,bash,role=execute]
 ----
 oc -n lightwell-repo get configmap stub-18-blast-radius \
   -o jsonpath='{.data.blast-radius\.txt}' > ~/track-7-2-blast-radius.txt
-# edit ~/track-7-2-blast-radius.txt, then:
+VEX_ID="$(oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo -o jsonpath='{.data.scored_vex_id}')"
+VEX_GAV="$(oc -n lightwell-repo get configmap demo-userinfo-lightwell-repo -o jsonpath='{.data.scored_vex_gav}')"
+sed -i \
+  -e "s/REPLACE_ME_VEX_ID/${VEX_ID}/" \
+  -e "s|REPLACE_ME_GAV|${VEX_GAV}|" \
+  -e "s/REPLACE_ME_STATUS/fixed/" \
+  -e "s/REPLACE_ME_VIA/via-lightwell-pin/" \
+  ~/track-7-2-blast-radius.txt
 oc -n lightwell-repo create configmap stub-18-blast-radius \
   --from-file=blast-radius.txt=$HOME/track-7-2-blast-radius.txt \
   --dry-run=client -o yaml | oc apply -f -
 ----
++
+Expected output:
++
+----
+configmap/stub-18-blast-radius configured
+----
 
-. ACS: confirm Job `rhacs-ci-token-mint` in `stackrox` is Complete. That Job mints Secret `rhacs-ci-secrets` and copies it into your build namespace (`student_build_namespace`) so `acs-image-check` can mount it. Provision also registers the in-cluster registry with Central — do not add an image integration by hand. On the learner Pipeline, pass `fail-on-skipped: "true"` on `acs-image-check` (seeded default is soft-skip). Re-run if the last TaskRun was `skipped`. Expect `passed` or `failed` — both prove the control is *on*. Do not screenshot Central as this Check.
+Mint a Continuous Integration token into Secret `rhacs-ci-secrets` in the namespace from `demo-userinfo-rhacs` (this roadshow uses `rhacs-operator`). Copy that secret into the build namespace so `acs-image-check` can mount it. Register the in-cluster registry only when that integration is missing. On the learner Pipeline, pass `fail-on-skipped: "true"` on `acs-image-check` (seeded default is soft-skip). Re-run if the last TaskRun was `skipped`. Expect `passed` or `failed`. Both prove the control is on. Do not screenshot Central as this Check.
++
+[source,bash,role=execute]
+----
+RHACS_NS="$(oc get configmap -A --field-selector metadata.name=demo-userinfo-rhacs -o jsonpath='{.items[0].metadata.namespace}')"
+BUILD_NS="$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_build_namespace}')"
+HOST="$(oc -n "${RHACS_NS}" get route central-reencrypt -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+if [[ -z "${HOST}" ]]; then
+  HOST="$(oc -n "${RHACS_NS}" get route central -o jsonpath='{.spec.host}')"
+fi
+ENDPOINT="central.${RHACS_NS}.svc:443"
+ADMIN_PASS="$(oc -n "${RHACS_NS}" get secret central-admin-password -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)"
+if [[ -z "${ADMIN_PASS}" ]]; then
+  ADMIN_PASS="$(oc -n "${RHACS_NS}" get secret central-htpasswd -o jsonpath='{.data.password}' | base64 -d)"
+fi
+EXISTING="$(oc -n "${RHACS_NS}" get secret rhacs-ci-secrets -o jsonpath='{.data.rox-api-token}' 2>/dev/null | base64 -d || true)"
+if [[ -z "${EXISTING}" ]]; then
+  RESP="$(curl -sk -u "admin:${ADMIN_PASS}" \
+    "https://${HOST}/v1/apitokens/generate" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"lightwell-ci","roles":["Continuous Integration"]}')"
+  TOKEN="$(printf '%s' "${RESP}" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token") or "")')"
+  test -n "${TOKEN}"
+  oc -n "${RHACS_NS}" patch secret rhacs-ci-secrets --type merge \
+    -p "{\"stringData\":{\"rox-api-endpoint\":\"${ENDPOINT}\",\"rox-api-token\":\"${TOKEN}\"}}"
+  echo "Stored ${RHACS_NS}/rhacs-ci-secrets"
+else
+  echo "${RHACS_NS}/rhacs-ci-secrets already has a token"
+fi
+EP="$(oc -n "${RHACS_NS}" get secret rhacs-ci-secrets -o jsonpath='{.data.rox-api-endpoint}' | base64 -d)"
+TK="$(oc -n "${RHACS_NS}" get secret rhacs-ci-secrets -o jsonpath='{.data.rox-api-token}' | base64 -d)"
+oc -n "${BUILD_NS}" create secret generic rhacs-ci-secrets \
+  --from-literal=rox-api-endpoint="${EP}" \
+  --from-literal=rox-api-token="${TK}" \
+  --dry-run=client -o yaml | oc apply -f -
+oc -n "${RHACS_NS}" create serviceaccount rhacs-registry-puller --dry-run=client -o yaml | oc apply -f -
+oc -n "${BUILD_NS}" create rolebinding rhacs-registry-puller-image-puller \
+  --clusterrole=system:image-puller \
+  --serviceaccount="${RHACS_NS}:rhacs-registry-puller" \
+  --dry-run=client -o yaml | oc apply -f -
+oc -n "${RHACS_NS}" annotate serviceaccount rhacs-registry-puller argocd.argoproj.io/tracking-id- --overwrite || true
+oc -n "${RHACS_NS}" label serviceaccount rhacs-registry-puller app.kubernetes.io/instance- --overwrite || true
+oc -n "${BUILD_NS}" annotate rolebinding rhacs-registry-puller-image-puller argocd.argoproj.io/tracking-id- --overwrite || true
+oc -n "${BUILD_NS}" label rolebinding rhacs-registry-puller-image-puller app.kubernetes.io/instance- --overwrite || true
+export HOST ADMIN_PASS RHACS_NS
+python3 - <<'PY'
+import base64, json, os, ssl, subprocess, sys, urllib.error, urllib.request
+host = os.environ["HOST"]
+admin = os.environ["ADMIN_PASS"]
+ns = os.environ["RHACS_NS"]
+endpoint = "image-registry.openshift-image-registry.svc:5000"
+name = "openshift-internal-registry"
+ctx = ssl._create_unverified_context()
+basic = base64.b64encode(f"admin:{admin}".encode()).decode()
+
+def req(method, path, body=None):
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(
+        f"https://{host}{path}", data=data, method=method,
+        headers={"Content-Type": "application/json", "Authorization": f"Basic {basic}"},
+    )
+    try:
+        with urllib.request.urlopen(request, context=ctx, timeout=60) as resp:
+            raw = resp.read().decode() or "{}"
+            return json.loads(raw)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode() if exc.fp else ""
+        print(f"{method} {path} failed: {exc.code} {detail}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+listing = req("GET", "/v1/imageintegrations")
+items = listing.get("integrations") or listing.get("imageIntegrations") or []
+if any((item.get("name") == name) or ((item.get("docker") or {}).get("endpoint") == endpoint) for item in items):
+    print(f"image integration {name} already present")
+else:
+    token = subprocess.check_output(
+        ["oc", "create", "token", "rhacs-registry-puller", "-n", ns, "--duration=8760h"],
+        text=True,
+    ).strip()
+    req("POST", "/v1/imageintegrations", {
+        "name": name,
+        "type": "docker",
+        "categories": ["REGISTRY"],
+        "skipTestIntegration": True,
+        "docker": {
+            "endpoint": endpoint,
+            "username": "serviceaccount",
+            "password": token,
+            "insecure": True,
+        },
+    })
+    print(f"Created image integration {name}")
+PY
+----
++
+Expected output:
++
+----
+secret/rhacs-ci-secrets
+serviceaccount/rhacs-registry-puller
+rolebinding.rbac.authorization.k8s.io/rhacs-registry-puller-image-puller
+openshift-internal-registry
+----
+
+A second run prints `rhacs-operator/rhacs-ci-secrets already has a token` and `image integration openshift-internal-registry already present`. `label "app.kubernetes.io/instance" not found` is harmless.
 
 == Check: report tokens + ACS not skipped
 
+. Check: report tokens + ACS not skipped
++
 [source,bash,role=execute]
 ----
 BUILD_NS="$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_build_namespace}')"
@@ -128,21 +273,28 @@ grep -E 'REPLACE_ME' ~/track-7-2-blast-radius.txt && echo 'STILL HAS PLACEHOLDER
 grep -E 'LW-DEMO-0002|3.14.0.rhlw-00001|via-lightwell-pin' ~/track-7-2-blast-radius.txt
 oc -n lightwell-repo get configmap stub-18-blast-radius \
   -o jsonpath='{.data.blast-radius\.txt}' | grep -E 'LW-DEMO-0002|3.14.0.rhlw-00001|via-lightwell-pin'
-oc -n stackrox get job rhacs-ci-token-mint
+RHACS_NS="$(oc get configmap -A --field-selector metadata.name=demo-userinfo-rhacs -o jsonpath='{.items[0].metadata.namespace}')"
+oc -n "${RHACS_NS}" get secret rhacs-ci-secrets -o jsonpath='{.data.rox-api-token}' | grep -q .
+echo "token present in ${RHACS_NS}"
 oc -n "${BUILD_NS}" get secret rhacs-ci-secrets
 oc -n "${BUILD_NS}" get tr -l tekton.dev/pipelineTask=acs-image-check
 ----
++
+Expected output:
++
+----
+placeholders gone
+vulnerability_id: LW-DEMO-0002
+gav: org.apache.commons:commons-lang3:3.14.0.rhlw-00001
+remediation: via-lightwell-pin
+vulnerability_id: LW-DEMO-0002
+gav: org.apache.commons:commons-lang3:3.14.0.rhlw-00001
+remediation: via-lightwell-pin
+token present in rhacs-operator
+rhacs-ci-secrets   Opaque   2
+----
 
 Pass when: Nexus GAV files were ingested; the report has the scored id + GAV + via-Lightwell token and no `REPLACE_ME`; `acs-image-check` is not `skipped`; CSAF importer is still off.
-
-:report-name: report-18-vex-acs
-:report-key: vex_layer
-:report-token: gav-bound
-include::partial$validate-job-report.adoc[]
-
-:validate-job: validate-18-vex-acs
-:validate-job-template: job-18.yaml
-include::partial$validate-job-rerun.adoc[]
 
 == Official documentation
 

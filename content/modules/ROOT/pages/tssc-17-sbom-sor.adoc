@@ -1,7 +1,7 @@
-= 7.1 SBOM system of record
+= 7.1 SBOM System of Record
 :source-highlighter: rouge
 :toc:
-:toclevels: 2
+:toclevels: 1
 
 == Overview
 
@@ -29,6 +29,8 @@ Lightwell Clearinghouse Premier member SBOMs ingest on the same API. Do not enab
 
 == Discover TPA (no secrets in git)
 
+. Discover TPA (no secrets in git)
++
 [source,bash,role=execute]
 ----
 oc -n trusted-profile-analyzer get configmap rhtpa-ingestion-info \
@@ -36,13 +38,29 @@ oc -n trusted-profile-analyzer get configmap rhtpa-ingestion-info \
 oc -n trusted-profile-analyzer get configmap demo-userinfo-rhtpa \
   -o jsonpath='url={.data.rhtpa_url}{"\n"}format={.data.sbom_format}{"\n"}'
 oc -n sso get configmap demo-userinfo-keycloak \
-  -o jsonpath='issuer={.data.oidc_issuer}{"\n"}user={.data.workshop_username}{"\n"}password={.data.workshop_password}{"\n"}'
+  -o jsonpath='issuer={.data.oidc_issuer}{"\n"}user={.data.workshop_username}{"\n"}'
+oc -n sso get configmap demo-userinfo-keycloak -o jsonpath='{.data.workshop_password}' \
+  | grep -q . && echo 'password=set'
+----
++
+Expected output:
++
+----
+tpa_ui=https://server-trusted-profile-analyzer.apps.cluster-wprcr.dyn.redhatworkshops.io
+csaf_gate=false
+url=https://server-trusted-profile-analyzer.apps.cluster-wprcr.dyn.redhatworkshops.io
+format=CycloneDX
+issuer=https://sso-tpa.apps.cluster-wprcr.dyn.redhatworkshops.io/realms/tpa
+user=tpa-user
+password=set
 ----
 
 The TPA password is the *value* of ConfigMap key `workshop_password` in `demo-userinfo-keycloak` (not the key name). CLI client secret is Secret `tpa-realm-cli-clients`. Do not commit either. Sign in from the *TPA UI* Route (realm `tpa`), not `https://sso…/admin/`.
 
 == Worked example (not the Check)
 
+. Worked example (not the Check)
++
 [source,bash]
 ----
 # Worked example ONLY — different purl / filename. Do not upload this as the Check.
@@ -53,8 +71,8 @@ curl -sk -X POST -H 'Content-Type: application/octet-stream' \
 
 == Your change: copy 4.4 SBOM; ingest
 
-Task `syft-sbom-rhtpa` writes ConfigMap `lab-sbom-cyclonedx` in the build namespace (the `sbom` workspace is `emptyDir` and is gone when the pod completes). `oc cp` / `oc exec` into a completed pod fails. Extract that ConfigMap — do not re-run the full 4.4 pipeline just to copy a file.
-
+. Task `syft-sbom-rhtpa` writes ConfigMap `lab-sbom-cyclonedx` in the build namespace (the `sbom` workspace is `emptyDir` and is gone when the pod completes). `oc cp` / `oc exec` into a completed pod fails. Extract that ConfigMap — do not re-run the full 4.4 pipeline just to copy a file.
++
 [source,bash,role=execute]
 ----
 BUILD_NS="$(oc -n gitea get configmap demo-userinfo-gitea -o jsonpath='{.data.student_build_namespace}')"
@@ -62,9 +80,22 @@ oc -n "${BUILD_NS}" get tr -l tekton.dev/pipelineTask=syft-sbom-rhtpa
 oc -n "${BUILD_NS}" extract configmap/lab-sbom-cyclonedx --to="${HOME}" --confirm
 test -f ~/sbom.cyclonedx.json && jq '{bomFormat, specVersion, components:(.components|length)}' ~/sbom.cyclonedx.json || echo 'EXTRACT ConfigMap lab-sbom-cyclonedx FIRST'
 ----
++
+Expected output:
++
+----
+syft-sbom-rhtpa
+Succeeded
+/home/lab-user/sbom.cyclonedx.json
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "components": 98
+}
+----
 
-Ingest *this* file (bound to the 6.2 digest) even if the pipeline already uploaded — you must be able to find the document. UI file picker or REST:
-
+. Ingest *this* file (bound to the 6.2 digest) even if the pipeline already uploaded — you must be able to find the document. UI file picker or REST
++
 [source,bash,role=execute]
 ----
 export OIDC_ISSUER="$(oc -n sso get configmap demo-userinfo-keycloak -o jsonpath='{.data.oidc_issuer}')"
@@ -83,6 +114,14 @@ curl -sk -X POST \
   -w '\nHTTP %{http_code}\n' \
   "${RHTPA_URL%/}/api/v3/sbom"
 ----
++
+Expected output:
++
+----
+HTTP 201
+----
+
+A second ingest returns a new id. HTTP 201 is the pass.
 
 Expect HTTP 201 (or another success). Open `server_url`, sign in, find the promoted digest / component.
 
@@ -92,15 +131,6 @@ image::tpa-app-sbom-ingested.png[TPA UI after ingesting the promoted app Cyclone
 == Check: TPA has the promoted SBOM
 
 Pass when TPA shows a CycloneDX document for the digest you promoted in 6.2 (UI or API list). `live_csaf_gate` stays false.
-
-:report-name: report-17-sbom-sor
-:report-key: sor_object
-:report-token: promoted-digest
-include::partial$validate-job-report.adoc[]
-
-:validate-job: validate-17-sbom-sor
-:validate-job-template: job-17.yaml
-include::partial$validate-job-rerun.adoc[]
 
 Continue to xref:tssc-18-vex-acs.adoc[7.2] when you are ready.
 

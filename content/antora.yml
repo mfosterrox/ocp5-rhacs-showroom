@@ -3,6 +3,7 @@ title: Red Hat OpenShift Security Roadshow
 version: master
 nav:
   - modules/ROOT/nav.adoc
+  - modules/security-response/nav.adoc
 
 asciidoc:
   attributes:
@@ -27,6 +28,10 @@ asciidoc:
     lightwell-product-url: 'https://www.redhat.com/en/lightwell'
     java-validated-url: 'https://packages.redhat.com/lightwell/java/validated'
     java-remediated-url: 'https://packages.redhat.com/lightwell/java/remediated'
+    java-demo-repo: 'https://github.com/lightwell-experience/lightwell-java-demo-app.git'
+    java-demo-revision: decfa713a0a705e4e388d359bd7eb16c51eaa946
+    java-demo-public-remediated-url: 'https://packages.redhat.com/lightwell/public-lightwell-demo/java/remediated/'
+    java-demo-public-validated-url: 'https://packages.redhat.com/lightwell/public-lightwell-demo/java/validated/'
     java-osv-url: 'https://packages.redhat.com/lightwell/osv/java/remediated'
     lightwell-artifactory-docs-url: 'https://docs.redhat.com/en/documentation/lightwell_network/current/configure-configure_artifactory_to_use_rhln_repository'
     docs-lwn-choose-repo-url: 'https://docs.redhat.com/en/documentation/red_hat_lightwell_network/current/get_started-choose_the_right_repository'

@@ -5,6 +5,7 @@
 :audit-evidence: "HTTP curl succeeds; cert-manager Certificate becomes Ready; HTTPS curl with the lab CA succeeds; HTTP is redirected to HTTPS."
 :cis-mitre-codes: '{"cisMapping":{"primary":["1.2.26"]},"mitre":{"techniques":["T1040"],"tactics":["TA0006"],"mitigations":["M1041"]}}'
 :toc:
+:toclevels: 1
 :icons: font
 
 **Duration:** ~20 minutes
@@ -27,29 +28,26 @@ Plain HTTP leaves credentials, cookies, and API bodies open on the wire. TLS enc
 == Your Mission
 Stand up an app, prove HTTP is readable, issue a certificate with cert-manager, then hit the same hostname again over HTTPS. Complete *Part A*, then *Part B*, then *Part C*.
 
-Click each step only if you need a hint.
+Click each step for the full solution.
+
+:lab-run-module: 101-12
+include::partial$lab-run.adoc[]
 
 === Part A: Start with an application
 Deploy a UBI httpd app, expose it on HTTP, and capture the Route hostname. That hostname is the name you will put on the certificate.
 
-.Create project 101-12-tls
+.Create project 101-12-tls or switch to project 101-12-tls
 [%collapsible]
 ====
-This lab is self-contained. It does not reuse the 101-11 rebuild project. Stay in this project for every later step.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 101-12-tls || oc project 101-12-tls
 ----
-
-TIP: `oc project` should print `Now using project "101-12-tls"`.
 ====
 
-.Deploy UBI httpd as webapp
+.Create deployment webapp from registry.access.redhat.com/ubi9/httpd-24, expose it on port 8080 target port 8080, then wait for rollout within 120s. Expect successfully rolled out
 [%collapsible]
 ====
-Use the OpenShift-ready UBI httpd image on port 8080. Wait until the rollout finishes before you expose it.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create deployment webapp --image=registry.access.redhat.com/ubi9/httpd-24
@@ -60,30 +58,22 @@ oc expose deployment webapp --port=8080 --target-port=8080
 ----
 oc rollout status deployment/webapp --timeout=120s
 ----
-
-TIP: Rollout status should end with `successfully rolled out`.
 ====
 
-.Create an HTTP Route for webapp
+.Expose service webapp, save the Route host as ROUTE, and echo $ROUTE. Expect a hostname
 [%collapsible]
 ====
-`oc expose service` creates an HTTP Route. Copy the hostname; Part B puts that exact name on the certificate.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc expose service webapp
 ROUTE=$(oc get route webapp -o jsonpath='{.spec.host}')
 echo "$ROUTE"
 ----
-
-TIP: The echo should be a hostname, not empty. If you open a new terminal later, run `oc project 101-12-tls` and set `ROUTE` again.
 ====
 
-.Curl the HTTP Route
+.Save Route webapp host as ROUTE, then curl http://$ROUTE headers and body. Expect HTTP 200 and HTML
 [%collapsible]
 ====
-Confirm the page loads. Anyone on-path can read this response.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 ROUTE=$(oc get route webapp -o jsonpath='{.spec.host}')
@@ -94,8 +84,6 @@ curl -sI "http://${ROUTE}" | head -10
 ----
 curl -s "http://${ROUTE}" | head -5
 ----
-
-TIP: You should see HTTP 200 and HTML. There is no TLS yet.
 ====
 
 === Part B: Issue a certificate with cert-manager
@@ -110,24 +98,18 @@ cert-manager watches `Certificate` objects, talks to an Issuer, and writes a TLS
 
 Do not edit or delete those ClusterIssuers. Do not change certificates in `openshift-ingress`, `openshift-config`, `cert-manager`, or `stackrox`.
 
-.List ClusterIssuers
+.List ClusterIssuers. Expect selfsigned and acme-bifrost-production-ddns Ready True
 [%collapsible]
 ====
-Confirm `selfsigned` and the ACME issuers are `Ready`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get clusterissuer
 ----
-
-TIP: `selfsigned` and `acme-bifrost-production-ddns` should show `True`.
 ====
 
-.Inspect the cluster ingress certificate
+.Get Certificate cert-manager-ingress-cert in openshift-ingress, then show issuer, subject, and dates from Secret cert-manager-ingress-cert. Expect a public CA issuer
 [%collapsible]
 ====
-This is a *publicly signed* certificate. Your lab certificate later is signed only by a CA you create.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get certificate -n openshift-ingress cert-manager-ingress-cert
@@ -138,15 +120,11 @@ oc get certificate -n openshift-ingress cert-manager-ingress-cert
 oc get secret cert-manager-ingress-cert -n openshift-ingress -o jsonpath='{.data.tls\.crt}' \
   | base64 -d | openssl x509 -noout -issuer -subject -dates
 ----
-
-TIP: The issuer should be a public CA (ACME / Let's Encrypt style). Browsers already trust that. They will not trust your lab CA until you pass `--cacert`.
 ====
 
-.Create the lab CA certificate
+.Switch to project 101-12-tls and apply Certificate lab-ca in namespace 101-12-tls, isCA true, commonName 101-12-lab-ca, secretName lab-ca-tls, issuerRef name selfsigned kind ClusterIssuer
 [%collapsible]
 ====
-Mint a CA in *your* namespace from the cluster `selfsigned` ClusterIssuer. Do not change that ClusterIssuer.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc project 101-12-tls
@@ -169,29 +147,21 @@ spec:
     kind: ClusterIssuer
 EOF
 ----
-
-TIP: `oc apply` should report `certificate.cert-manager.io/lab-ca created` (or configured).
 ====
 
-.Wait until lab-ca is Ready
+.Wait until Certificate lab-ca in 101-12-tls is Ready within 90s, then get it. Expect READY True
 [%collapsible]
 ====
-cert-manager writes Secret `lab-ca-tls` when the CA is Ready.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc wait --for=condition=Ready certificate/lab-ca -n 101-12-tls --timeout=90s
 oc get certificate lab-ca -n 101-12-tls
 ----
-
-TIP: `READY` should be `True`.
 ====
 
-.Create the namespaced CA Issuer
+.Apply Issuer lab-ca in namespace 101-12-tls using CA Secret lab-ca-tls
 [%collapsible]
 ====
-This Issuer signs leaf certificates using Secret `lab-ca-tls`. It lives only in `101-12-tls`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<'EOF'
@@ -205,15 +175,11 @@ spec:
     secretName: lab-ca-tls
 EOF
 ----
-
-TIP: `issuer.cert-manager.io/lab-ca created` (or configured).
 ====
 
-.Issue the webapp certificate for the Route hostname
+.Switch to 101-12-tls, save Route webapp host as ROUTE, and apply Certificate webapp in 101-12-tls with secretName webapp-tls, issuerRef lab-ca kind Issuer, and dnsNames $ROUTE
 [%collapsible]
 ====
-The SAN must match the HTTP Route hostname exactly. Recapture `$ROUTE` if your shell lost it.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc project 101-12-tls
@@ -238,15 +204,11 @@ spec:
   - ${ROUTE}
 EOF
 ----
-
-TIP: Echo should show the same hostname as Part A. `oc apply` should create `certificate.cert-manager.io/webapp`.
 ====
 
-.Confirm both certificates are Ready
+.Wait until Certificate webapp in 101-12-tls is Ready within 90s, list certificates and issuers, then get Secrets webapp-tls and lab-ca-tls. Expect both READY True
 [%collapsible]
 ====
-`webapp-tls` holds the leaf cert and key. `lab-ca-tls` is the CA you will pass to `curl --cacert`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc wait --for=condition=Ready certificate/webapp -n 101-12-tls --timeout=90s
@@ -257,18 +219,14 @@ oc get certificate,issuer -n 101-12-tls
 ----
 oc get secret webapp-tls lab-ca-tls -n 101-12-tls
 ----
-
-TIP: Both certificates `READY True`. Both Secrets exist.
 ====
 
 === Part C: Access the application again
 Replace the HTTP Route with edge TLS that uses the cert-manager Secret. Then curl HTTPS with the lab CA, and confirm HTTP redirects.
 
-.Extract the cert, key, and CA to /tmp/101-12-certs
+.Switch to 101-12-tls, save Route webapp host as ROUTE, and write Secret webapp-tls and lab-ca-tls PEMs to /tmp/101-12-certs/tls.crt, tls.key, and ca.crt
 [%collapsible]
 ====
-Keep the same hostname so the SAN still matches. Write PEM files the `oc create route` command can read.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc project 101-12-tls
@@ -282,15 +240,11 @@ oc get secret webapp-tls -n 101-12-tls -o jsonpath='{.data.tls\.crt}' | base64 -
 oc get secret webapp-tls -n 101-12-tls -o jsonpath='{.data.tls\.key}' | base64 -d > /tmp/101-12-certs/tls.key
 oc get secret lab-ca-tls -n 101-12-tls -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/101-12-certs/ca.crt
 ----
-
-TIP: `ls /tmp/101-12-certs` should show `tls.crt`, `tls.key`, and `ca.crt`.
 ====
 
-.Replace the HTTP Route with edge TLS and redirect
+.Delete Route webapp, then create edge Route webapp for service webapp port 8080 on hostname $ROUTE using /tmp/101-12-certs/tls.crt, tls.key, and ca.crt with insecure policy Redirect. Expect TLS termination edge
 [%collapsible]
 ====
-Delete the HTTP Route, then create an edge Route on the same hostname with the extracted PEM files.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 ROUTE=$(oc get route webapp -o jsonpath='{.spec.host}')
@@ -306,65 +260,47 @@ oc create route edge webapp --service=webapp --port=8080 \
   --ca-cert=/tmp/101-12-certs/ca.crt \
   --insecure-policy=Redirect
 ----
-
-TIP: `oc get route webapp` should show TLS termination `edge`.
 ====
 
-.Curl HTTPS without a trusted CA
+.Curl https://$ROUTE for Route webapp in 101-12-tls without a CA. Expect a TLS verify error
 [%collapsible]
 ====
-Expect a TLS verify error. Encryption is not the same as trust.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 ROUTE=$(oc get route webapp -n 101-12-tls -o jsonpath='{.spec.host}')
 curl -sS "https://${ROUTE}" | head -3 || true
 ----
-
-TIP: `curl` should fail to verify the certificate.
 ====
 
-.Curl HTTPS with the lab CA
+.Curl https://$ROUTE for Route webapp in 101-12-tls with --cacert /tmp/101-12-certs/ca.crt. Expect the httpd HTML
 [%collapsible]
 ====
-Pass `--cacert` so `curl` trusts `101-12-lab-ca`. You should get the httpd page.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 ROUTE=$(oc get route webapp -n 101-12-tls -o jsonpath='{.spec.host}')
 curl -sS --cacert /tmp/101-12-certs/ca.crt "https://${ROUTE}" | head -5
 ----
-
-TIP: HTML from the app. `curl -k` also loads the page, but it skips identity checks -- a man-in-the-middle with any certificate would succeed.
 ====
 
-.Prove HTTP redirects to HTTPS
+.Show headers for http://$ROUTE on Route webapp in 101-12-tls. Expect 301 or 302 and Location https://
 [%collapsible]
 ====
-Insecure policy `Redirect` should send `http://` to `https://`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 ROUTE=$(oc get route webapp -n 101-12-tls -o jsonpath='{.spec.host}')
 curl -sI "http://${ROUTE}" | grep -iE 'HTTP/|location'
 ----
-
-TIP: Look for a 302/301 and a `Location: https://` header.
 ====
 
-.Show the certificate issuer on the wire
+.Show subject, issuer, and SAN for $ROUTE:443 on Route webapp in 101-12-tls. Expect issuer 101-12-lab-ca and a SAN matching the Route hostname
 [%collapsible]
 ====
-The issuer should be your lab CA, not the public ACME ingress CA.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 ROUTE=$(oc get route webapp -n 101-12-tls -o jsonpath='{.spec.host}')
 echo | openssl s_client -connect "${ROUTE}:443" -servername "${ROUTE}" 2>/dev/null \
   | openssl x509 -noout -subject -issuer -ext subjectAltName
 ----
-
-TIP: Issuer `101-12-lab-ca`. SAN matches the Route hostname.
 ====
 
 == Signed certificates vs self-signed
@@ -411,6 +347,8 @@ What breaks without this:
 IMPORTANT: HTTPS with redirect on Routes, cert-manager (or ACME) for issuance, a CA that matches your trust model, and a rotation path (cert-manager, Vault PKI, or ZTWIM depending on north-south vs east-west).
 
 NOTE: edge TLS is fine when the cluster internal path is trusted; re-encrypt or passthrough when you need end-to-end or app-owned certs. Do not use `-k` in production.
+
+This track is complete. Return to the xref:index.adoc[home page] to choose the next track.
 
 image::https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExeXdiMmFwaTNrbW02cTNod3BmaTh2aGRrdDJsc3d4NHpqNXY5ZzkwNiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/073QSCJf2tIbtWjZpb/giphy.gif[link=self, window=blank, width=100%, class="center"]
 
