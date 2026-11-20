@@ -9,7 +9,8 @@
 # Cluster-wide RHACS/Compliance/demo-app deploy is owned by OpenShift GitOps
 # (roadshow-prereqs + roadshow-demo-apps). The Lightwell Java vulnerable
 # release is the Argo CD Application lightwell-java. This script waits for
-# that Application. It does not oc apply that workload. This script also applies
+# that Application. It does not oc apply that workload. It also enables
+# bash tab completion for oc, kubectl, and roxctl. This script also applies
 # rhel-webserver in rhacs-virt-webserver and the checkout-service and
 # ledger-service user-defined networks under setup/user-defined-network/.
 # rhel-webserver joins checkout-service with the checkout containers.
@@ -179,6 +180,93 @@ ensure_lab_local_bin() {
   fi
 }
 
+# Write bash completion for the lab CLIs and source it from interactive shells.
+# Do not source ~/.bashrc from this script. Bastion images often exit when it
+# is read by a non-interactive shell.
+ensure_shell_completion() {
+  local comp_dir="${HOME}/.local/share/bash-completion/completions"
+  local bashrc="${HOME}/.bashrc"
+  local marker_begin="# BEGIN roadshow-shell-completion"
+  local marker_end="# END roadshow-shell-completion"
+  local cmd file tmp block
+  mkdir -p "${comp_dir}"
+  touch "${bashrc}"
+
+  if [[ ! -r /usr/share/bash-completion/bash_completion ]]; then
+    if command -v dnf >/dev/null 2>&1; then
+      sudo dnf install -y bash-completion || echo "NOTE: bash-completion package was not installed."
+    elif command -v yum >/dev/null 2>&1; then
+      sudo yum install -y bash-completion || echo "NOTE: bash-completion package was not installed."
+    fi
+  fi
+
+  for cmd in oc kubectl roxctl; do
+    if ! command -v "${cmd}" >/dev/null 2>&1; then
+      echo "${cmd} is not on PATH; skipping its completion."
+      continue
+    fi
+    file="${comp_dir}/${cmd}"
+    tmp="${file}.tmp"
+    if ! "${cmd}" completion bash > "${tmp}"; then
+      rm -f "${tmp}"
+      echo "NOTE: ${cmd} completion bash failed; skipping ${cmd}."
+      continue
+    fi
+    if [[ ! -s "${tmp}" ]]; then
+      rm -f "${tmp}"
+      echo "NOTE: ${cmd} completion bash wrote an empty script; skipping ${cmd}."
+      continue
+    fi
+    mv "${tmp}" "${file}"
+    echo "Wrote ${cmd} completion -> ${file}"
+  done
+
+  block=$(cat <<'EOF'
+# BEGIN roadshow-shell-completion
+# Tab completion for oc, kubectl, and roxctl. Interactive shells only.
+if [[ $- == *i* ]]; then
+  if [[ -r /usr/share/bash-completion/bash_completion ]]; then
+    # shellcheck disable=SC1091
+    source /usr/share/bash-completion/bash_completion
+  fi
+  if [[ -r "${HOME}/.local/share/bash-completion/completions/oc" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOME}/.local/share/bash-completion/completions/oc"
+  fi
+  if [[ -r "${HOME}/.local/share/bash-completion/completions/kubectl" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOME}/.local/share/bash-completion/completions/kubectl"
+  elif declare -F __start_oc >/dev/null 2>&1; then
+    complete -o default -F __start_oc kubectl 2>/dev/null || true
+  fi
+  if [[ -r "${HOME}/.local/share/bash-completion/completions/roxctl" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOME}/.local/share/bash-completion/completions/roxctl"
+  fi
+fi
+# END roadshow-shell-completion
+EOF
+)
+
+  if grep -qF "${marker_begin}" "${bashrc}"; then
+    tmp="$(mktemp)"
+    awk -v begin="${marker_begin}" -v end="${marker_end}" '
+      $0 == begin { skip = 1; next }
+      $0 == end { skip = 0; next }
+      skip != 1 { print }
+    ' "${bashrc}" > "${tmp}"
+    printf '\n%s\n' "${block}" >> "${tmp}"
+    mv "${tmp}" "${bashrc}"
+  else
+    printf '\n%s\n' "${block}" >> "${bashrc}"
+  fi
+  echo "Shell completion enabled. Open a new terminal or run: source ~/.bashrc"
+}
+
+do_shell_completion() {
+  ensure_shell_completion
+}
+
 # Copy a named binary out of a registry.redhat.io image (same method as Lightwell Showroom).
 install_cli_from_rh_image() {
   local name="$1"
@@ -302,7 +390,7 @@ load_roadshow_env
 
 # Count top-level lab steps.
 TOTAL=0
-TOTAL=$((TOTAL + 9)) # admin + lightwell java + user-defined network + ACS MCP + quay env + tssc clis + CLI vars + verify API + ACS VM
+TOTAL=$((TOTAL + 10)) # admin + lightwell java + user-defined network + ACS MCP + quay env + tssc clis + CLI vars + verify API + shell completion + ACS VM
 [[ "${SKIP_RHACS_CONFIGURE}" != true ]] && TOTAL=$((TOTAL + 1))
 [[ "${SKIP_DEMO_APPS}" != true ]] && TOTAL=$((TOTAL + 1)) # clone
 [[ "${SKIP_DEMO_APPS}" != true && "${SKIP_DEMO_APPLY}" != true ]] && TOTAL=$((TOTAL + 1)) # apply
@@ -1707,6 +1795,7 @@ fi
 
 progress_run "Configure RHACS CLI variables" do_cli_vars
 progress_run "Verify RHACS API access" do_verify_api
+progress_run "Enable shell completion" do_shell_completion
 
 # While optional RHACS configure runs in the background, clone demo-apps for image builds.
 if [[ "${SKIP_DEMO_APPS}" != true ]]; then
@@ -1748,5 +1837,6 @@ progress_success_banner "Lab environment setup completed successfully" \
   "Quay credentials read from the cluster" \
   "RHACS CLI ready (ROX_CENTRAL_ADDRESS / ROX_API_TOKEN saved)" \
   "TSSC CLIs on PATH (cosign, oc-mirror, ec in ~/.local/bin; mvn from the Maven RPM)" \
+  "Shell completion for oc, kubectl, and roxctl (source ~/.bashrc or open a new terminal)" \
   "Env file: ${ROADSHOW_ENV_FILE}" \
   "Detailed log: ${LOG_FILE}"

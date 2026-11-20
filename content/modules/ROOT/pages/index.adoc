@@ -9,7 +9,7 @@ This course offers hands-on experience with Kubernetes-native security on Red Ha
 * *This page is home* — Credentials and console links live here. Use the home button anytime you get lost.
 * *Navigate with the table of contents* — Modules are in the left table of contents, or use *Next* at the bottom of each page.
 * *Use consoles in Showroom, or open them in a new tab* — Keep this guide open. Prefer the console tabs on the right of the lab UI. To open a link in a new browser tab: on a Mac, *<cmd> click*; on Windows/Linux, *<ctrl> click* or right-click → "Open in new tab."
-* *Use the terminal tab for command line work* — Run `oc`, `roxctl`, and `podman` on the RHEL bastion.
+* *Use the terminal tab for command line work* — Run `oc`, `roxctl`, and `podman` on the RHEL bastion. After setup, `oc` and `roxctl` tab-complete in a new terminal.
 * *Cluster setup and services are managed by GitOps* — RHACS, Quay, GitOps, Compliance Operator, and the vulnerable demo apps are already synced by Argo CD. Deleting resources by accident is no problem, as they will be recreated by GitOps.
 * *Start any track from this page.* The tracks are independent: 101, 201, 301, then RHACS, Lightwell Java, Lightwell TSSC, and Virtualization. When you finish a track, *Next* brings you back here.
 
@@ -18,7 +18,7 @@ IMPORTANT: Make sure to run the setup script below! OpenShift Lightspeed is alre
 [[environment-setup]]
 == Environment setup
 
-The following script installs the TSSC CLIs (`cosign`, `oc-mirror`, `ec`, and `mvn`) and reads Quay and RHACS credentials into your shell. OpenShift Lightspeed is already configured with the platform model.
+The following script installs the TSSC CLIs (`cosign`, `oc-mirror`, `ec`, and `mvn`), reads Quay and RHACS credentials into your shell, and enables tab completion for `oc`, `kubectl`, and `roxctl`. OpenShift Lightspeed is already configured with the platform model. `source ~/.bashrc` loads that completion in this terminal.
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
