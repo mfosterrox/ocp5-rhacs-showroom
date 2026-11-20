@@ -55,6 +55,9 @@ RHACM Policy annotations (`standards`, `categories`, `controls`) are what the Go
 
 Click each step for the full solution.
 
+:lab-run-module: 201-10
+include::partial$lab-run.adoc[]
+
 === Part A: Hub inventory and placement
 
 .Get CRD policies.policy.open-cluster-management.io, ManagedClusters, labels for ManagedCluster local-cluster, and ManagedClusterSets. Expect the CRD, local-cluster=true, and a ManagedClusterSet

@@ -32,6 +32,9 @@ A foothold in any pod can scan sideways to databases and internal APIs when east
 
 Click each step for the full solution.
 
+:lab-run-module: 101-05
+include::partial$lab-run.adoc[]
+
 .Create project 101-05-n-netpol-demo
 [%collapsible]
 ====

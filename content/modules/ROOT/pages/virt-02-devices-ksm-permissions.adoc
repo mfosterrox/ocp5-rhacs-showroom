@@ -32,6 +32,9 @@ List permitted host devices (expect empty), confirm KSM is not configured, and `
 
 Click each step for the full solution.
 
+:lab-run-module: virt-02
+include::partial$lab-run.adoc[]
+
 === Control: Restrict GPU and USB pass-through to approved devices (Level 1 Control)
 
 `spec.permittedHostDevices` on HCO is the cluster allow-list for mediated devices, PCI devices, and USB devices that VMs may consume.

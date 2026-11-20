@@ -31,6 +31,9 @@ This lab tracks the https://github.com/validatedpatterns/layered-zero-trust[Laye
 
 Click each step for the full solution.
 
+:lab-run-module: 201-05
+include::partial$lab-run.adoc[]
+
 .Run ~/ocp5-rhacs-showroom/setup/vault-lab/install-vault.sh
 [%collapsible]
 ====

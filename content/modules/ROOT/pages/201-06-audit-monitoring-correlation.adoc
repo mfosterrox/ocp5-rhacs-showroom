@@ -32,6 +32,9 @@ Deploy Splunk as the lab SIEM, forward kube-apiserver audit to it, generate a su
 
 Click each step for the full solution.
 
+:lab-run-module: 201-06
+include::partial$lab-run.adoc[]
+
 === Part A: SIEM and audit forwarding
 
 IMPORTANT: Splunk’s first boot often takes **10–25 minutes**. Start `install.sh`, then keep reading Why it matters / Detection Logic while it rolls.

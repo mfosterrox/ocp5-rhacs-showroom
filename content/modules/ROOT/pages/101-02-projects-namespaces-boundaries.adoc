@@ -37,6 +37,9 @@ Without project boundaries, one compromised identity or runaway workload can rea
 
 Each title has the values for that step. Open it for the command.
 
+:lab-run-module: 101-02
+include::partial$lab-run.adoc[]
+
 .Create project 101-02-demo with display name "Security Demo" and description "101-02 Lab Project"
 [%collapsible]
 ====

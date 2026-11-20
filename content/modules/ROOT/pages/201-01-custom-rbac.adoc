@@ -41,6 +41,9 @@ When you finish, you should be able to say in one sentence what this identity ma
 
 Click each step for the full solution.
 
+:lab-run-module: 201-01
+include::partial$lab-run.adoc[]
+
 .Create project 201-01-c-rbac-lab
 [%collapsible]
 ====

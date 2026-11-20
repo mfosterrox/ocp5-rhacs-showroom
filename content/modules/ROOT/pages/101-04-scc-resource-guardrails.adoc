@@ -37,6 +37,9 @@ Refuse the privilege ladder attackers want (`anyuid`, UID 0, port 80) and stop n
 
 Click each step for the full solution.
 
+:lab-run-module: 101-04
+include::partial$lab-run.adoc[]
+
 === Part A: SCC Limits & Non-Root Realities
 An unpatched vendor image wants root and port 80—exactly the privilege ladder attackers climb after breakout. Prove restricted SCC blocks it, see what `anyuid` would unlock if you caved, and document any unavoidable exception instead of silently normalizing root.
 

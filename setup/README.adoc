@@ -93,6 +93,13 @@ source ~/.bashrc
 
 Use `--rhacs-configure` or `--apply-demo-apps` only on brownfield clusters that are not GitOps-managed.
 
+At the start of a hands-on module, `setup/lab-run.sh` runs that module's solution commands and prints a score such as `Grade: 6/8`. The numerator is how many steps finished. The denominator is the number of solution steps in the module. Run it once, before cleanup. Cleanup is still separate and does not grade.
+
+[source,bash]
+----
+bash setup/lab-run.sh --module 101-01
+----
+
 Attendees record module completion by running `setup/lab-cleanup.sh` at the end of each module (documented as a routine cleanup step). Each successful cleanup writes a marker line to `~/.acs-roadshow/progress` on the bastion for instructor verification / gameify scoring:
 
 [source,text]

@@ -35,6 +35,9 @@ Prove CNV is healthy, name the HyperConverged object you will audit from virt-01
 
 Click each step for the full solution.
 
+:lab-run-module: virt-00
+include::partial$lab-run.adoc[]
+
 .Confirm a Succeeded ClusterServiceVersion in openshift-cnv whose name includes kubevirt-hyperconverged
 [%collapsible]
 ====

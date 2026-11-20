@@ -30,6 +30,9 @@ Deeper correlation in Splunk (SIEM + ClusterLogForwarder) with RHACS is xref:201
 
 Click each step for the full solution.
 
+:lab-run-module: 101-09
+include::partial$lab-run.adoc[]
+
 === Part A: CIS controls and where the logs live
 OpenShift writes **three** API audit streams on every control plane node. `oc adm node-logs` reads them without SSH. You need permission to get `nodes/log` (`cluster-admin` or the roadshow `node-log-viewer` ClusterRole).
 

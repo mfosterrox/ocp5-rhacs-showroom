@@ -27,6 +27,9 @@ Read APIServer encryption, confirm the Python app has no Secret env, and check d
 
 Click each step for the full solution.
 
+:lab-run-module: 301-07
+include::partial$lab-run.adoc[]
+
 .Print apiserver cluster spec.encryption.type. Expect aesgcm or aescbc. Empty or identity means encryption at rest is off
 [%collapsible]
 ====

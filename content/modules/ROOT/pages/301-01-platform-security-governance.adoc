@@ -53,6 +53,9 @@ Apply PolicySet `stride-ocp-baseline`, watch it NonCompliant while `inform` is o
 
 Click each step for the full solution.
 
+:lab-run-module: 301-01
+include::partial$lab-run.adoc[]
+
 === Part A: Hub inventory
 
 .Confirm CRD policies.policy.open-cluster-management.io, list managedclusters, and show labels for managedcluster local-cluster. Expect the CRD and label local-cluster=true

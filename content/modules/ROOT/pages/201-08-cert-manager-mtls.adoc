@@ -34,6 +34,9 @@ Do **not** edit or delete ClusterIssuers named `selfsigned` or `acme-*`. Do not 
 
 Click each step for the full solution.
 
+:lab-run-module: 201-08
+include::partial$lab-run.adoc[]
+
 === Part A: In-cluster issuance (self-signed)
 
 This is the intro: cert-manager writes a Secret. The signer is local. Clients need `--cacert` or `-k`. That is enough for a lab mTLS mount; it is not enough for “the world trusts this name.”

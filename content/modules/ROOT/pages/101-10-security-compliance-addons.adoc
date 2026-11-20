@@ -29,6 +29,9 @@ SPO and RHACS still matter for runtime and image risk; this hour is the audit-lo
 
 Click each step for the full solution.
 
+:lab-run-module: 101-10
+include::partial$lab-run.adoc[]
+
 .List pods in openshift-compliance and profiles matching ocp4-cis. Expect Running pods and an ocp4-cis profile, not only ocp4-cis-node
 [%collapsible]
 ====

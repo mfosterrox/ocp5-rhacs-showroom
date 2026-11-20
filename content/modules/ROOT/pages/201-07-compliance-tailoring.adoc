@@ -63,6 +63,9 @@ NOTE: `audit_log_forwarding_uses_tls` and `audit_error_alert_exists` are STIG/NI
 
 Click each step for the full solution.
 
+:lab-run-module: 201-07
+include::partial$lab-run.adoc[]
+
 === Part A: Prove 201-06 against CIS
 
 .Check that a ClusterLogForwarder pipeline in openshift-logging lists inputRefs audit, for observability.openshift.io and for logging.openshift.io instance. Expect true

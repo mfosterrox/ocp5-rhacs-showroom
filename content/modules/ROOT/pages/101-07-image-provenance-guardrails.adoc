@@ -32,6 +32,9 @@ This is the 101 baseline (ValidatingAdmissionPolicy on a labeled namespace). Lat
 
 Click each step for the full solution.
 
+:lab-run-module: 101-07
+include::partial$lab-run.adoc[]
+
 === Part A: Allow-list the registries
 Mark one namespace, install the policy, then prove `docker.io` and `ghcr.io` cannot create a Deployment there. Leave the cluster-scoped policy in place until the module cleanup at the end.
 
