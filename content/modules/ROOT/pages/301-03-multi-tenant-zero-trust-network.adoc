@@ -38,25 +38,19 @@ Click each step for the full solution.
 
 === Part A: Open path (101-05 reminder)
 
-.Confirm AdminNetworkPolicy CRDs
+.Get CRD adminnetworkpolicies.policy.networking.k8s.io and print network.operator cluster spec.defaultNetwork.type. Expect OVNKubernetes
 [%collapsible]
 ====
-If this fails, stop. ANP requires OVN-Kubernetes on a supported OpenShift version.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get crd adminnetworkpolicies.policy.networking.k8s.io
 oc get network.operator cluster -o jsonpath='{.spec.defaultNetwork.type}{"\n"}'
 ----
-
-TIP: CRD exists. `defaultNetwork.type` is `OVNKubernetes`.
 ====
 
-.Create two tenant projects and a small HTTP app in each
+.Create projects 301-03-tenant-a and 301-03-tenant-b, label each stride.example.com/workshop=301-03, create deployment app in each with image registry.access.redhat.com/ubi9/python-311 running python3 -m http.server 8080, expose port 8080 and target-port 8080, then wait for rollout of deploy/app in both with timeout 120s
 [%collapsible]
 ====
-Labels `stride.example.com/workshop=301-03` are what the ANPs select. Do **not** set restricted PSA here—the lesson is network, not SCC.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 301-03-tenant-a
@@ -72,30 +66,24 @@ oc expose deployment app -n 301-03-tenant-b --port=8080 --target-port=8080
 oc rollout status deploy/app -n 301-03-tenant-a --timeout=120s
 oc rollout status deploy/app -n 301-03-tenant-b --timeout=120s
 ----
-
-TIP: Two projects, two `app` Services on 8080.
 ====
 
-.Prove A can reach B (open path)
+.From deploy/app in namespace 301-03-tenant-a, print the HTTP status of http://app.301-03-tenant-b.svc:8080/ with timeout 8. Expect 200
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec -n 301-03-tenant-a deploy/app -- python3 -c "import urllib.request; print(urllib.request.urlopen('http://app.301-03-tenant-b.svc:8080/', timeout=8).status)"
 ----
-
-TIP: Prints `200`. That is the 101-05 open path between namespaces.
 ====
 
 === Part B: Platform deny (ANP)
 
 Do **not** `oc apply` a `BaselineAdminNetworkPolicy` named `default`. If the cluster already has one, leave it. This lab only creates **labeled** `AdminNetworkPolicy` objects.
 
-.Apply allow-DNS, allow-intra, deny-cross-tenant
+.From ~/ocp5-rhacs-showroom/setup/anp-lab, apply allow-dns.yaml, allow-intra-tenant.yaml, and deny-cross-tenant.yaml, then list adminnetworkpolicy with label app.kubernetes.io/component=301-03-anp. Expect four AdminNetworkPolicy objects
 [%collapsible]
 ====
-Priority: 10 DNS, 20/21 intra-namespace, 50 deny other workshop tenants. Lower number wins.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 cd ~/ocp5-rhacs-showroom/setup/anp-lab
@@ -104,39 +92,31 @@ oc apply -f allow-intra-tenant.yaml
 oc apply -f deny-cross-tenant.yaml
 oc get adminnetworkpolicy -l app.kubernetes.io/component=301-03-anp
 ----
-
-TIP: Four ANP objects. `BaselineAdminNetworkPolicy/default` is unchanged if it existed.
 ====
 
-.Re-test A → B (expect fail)
+.From deploy/app in namespace 301-03-tenant-a, open http://app.301-03-tenant-b.svc:8080/ with timeout 8. Expect a timeout or URLError
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec -n 301-03-tenant-a deploy/app -- python3 -c "import urllib.request; urllib.request.urlopen('http://app.301-03-tenant-b.svc:8080/', timeout=8)"
 ----
-
-TIP: Timeout or URLError. Cross-tenant ingress is denied. In-namespace DNS still works because of `stride-allow-dns`.
 ====
 
-.Prove a tenant cannot delete the ANP
+.Create service account tenant-admin in namespace 301-03-tenant-a, bind role admin to it, then delete adminnetworkpolicy stride-deny-cross-tenant as system:serviceaccount:301-03-tenant-a:tenant-admin. Expect Forbidden
 [%collapsible]
 ====
-`lab-user` is often cluster-admin. Impersonate a project admin SA.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create sa tenant-admin -n 301-03-tenant-a
 oc adm policy add-role-to-user admin -z tenant-admin -n 301-03-tenant-a
 oc delete adminnetworkpolicy stride-deny-cross-tenant --as=system:serviceaccount:301-03-tenant-a:tenant-admin
 ----
-
-TIP: `Forbidden`. Cluster-scoped ANP is not in the tenant’s `admin` Role.
 ====
 
 === Part C: Tenant NetworkPolicy cannot weaken ANP
 
-.Allow in-namespace in tenant-a (101-05 skill)
+.Apply NetworkPolicy allow-same-namespace in namespace 301-03-tenant-a with an empty podSelector, policyTypes Ingress, and ingress from an empty podSelector, then print the status of http://app.301-03-tenant-a.svc:8080/ with timeout 8 (expect 200) and open http://app.301-03-tenant-b.svc:8080/ with timeout 8 (expect a timeout or URLError)
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -157,8 +137,6 @@ EOF
 oc exec -n 301-03-tenant-a deploy/app -- python3 -c "import urllib.request; print(urllib.request.urlopen('http://app.301-03-tenant-a.svc:8080/', timeout=8).status)"
 oc exec -n 301-03-tenant-a deploy/app -- python3 -c "import urllib.request; urllib.request.urlopen('http://app.301-03-tenant-b.svc:8080/', timeout=8)"
 ----
-
-TIP: Same-namespace `200`. Cross-tenant still fails. Tenant NP did not override ANP.
 ====
 
 == Debrief

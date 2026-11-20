@@ -17,7 +17,7 @@ Container checkpointing is generally available in OpenShift 4.17 and later. `che
 
 Checkpoint the `httpd` container on `payment-gateway` and inspect the process tree.
 
-.Create a checkpoint and copy it to the bastion
+.Checkpoint the httpd container of the app=payment-gateway pod in payment-gateway-{workshop_user_suffix} through the node proxy checkpoint API, then copy the tarball to /tmp/$CHECKPOINT_FILE
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -52,7 +52,7 @@ ls -lah "/tmp/$CHECKPOINT_FILE"
 image::fsi-security/criu-checkpoint.png[CRIU checkpoint archive,link=self, window=blank, width=100%]
 ====
 
-.Inspect the process tree
+.Install checkpointctl from https://raw.githubusercontent.com/jmhbnz/checkpointctl/main/bin/checkpointctl to /tmp/checkpointctl, then run /tmp/checkpointctl inspect --ps-tree-env on /tmp/checkpoint-payment-gateway_payment-gateway*. Expect httpd and exfil.sh
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -64,8 +64,6 @@ chmod +x /tmp/checkpointctl
 
 /tmp/checkpointctl inspect --ps-tree-env /tmp/checkpoint-payment-gateway_payment-gateway*
 ----
-
-The process tree should include `httpd` and `exfil.sh`. That script is the process left behind by the simulated intrusion. Other `checkpointctl inspect` flags are listed by `/tmp/checkpointctl inspect --help`.
 ====
 
 == What you learned

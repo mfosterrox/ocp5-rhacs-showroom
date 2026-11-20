@@ -35,53 +35,26 @@ Prove CNV is healthy, name the HyperConverged object you will audit from virt-01
 
 Click each step for the full solution.
 
-.Confirm the OpenShift Virtualization CSV
+.Confirm a Succeeded ClusterServiceVersion in openshift-cnv whose name includes kubevirt-hyperconverged
 [%collapsible]
 ====
-You want a Succeeded ClusterServiceVersion in `openshift-cnv`. If this is empty, stop: the rest of the pathway cannot run.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get csv -n openshift-cnv
 ----
-
-TIP: Look for a CSV whose name includes `kubevirt-hyperconverged` (or similar) with phase `Succeeded`.
 ====
 
-.Get the HyperConverged object
+.Get HyperConverged kubevirt-hyperconverged in openshift-cnv, then show spec.featureGates. Expect decentralizedLiveMigration true and videoConfig true. Expect alignCPUs, containerPathVolumes, declarativeHotplugVolumes, deployKubeSecondaryDNS, disableMDevConfiguration, downwardMetrics, enableMultiArchBootImageImport, incrementalBackup, objectGraph, and persistentReservation false
 [%collapsible]
 ====
-Almost every platform control in this pathway is a field on this single namespaced CR. Operators reconcile from HCO; do not jsonpatch the downstream KubeVirt/CDI objects yourself (virt-01 covers that annotation).
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get hyperconverged kubevirt-hyperconverged -n openshift-cnv
 oc get hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv -o json | jq '.spec.featureGates // {}'
 ----
-
-*console output:*
-```
-NAME                      AGE
-kubevirt-hyperconverged   34h
-{
-  "alignCPUs": false,
-  "containerPathVolumes": false,
-  "decentralizedLiveMigration": true,
-  "declarativeHotplugVolumes": false,
-  "deployKubeSecondaryDNS": false,
-  "disableMDevConfiguration": false,
-  "downwardMetrics": false,
-  "enableMultiArchBootImageImport": false,
-  "incrementalBackup": false,
-  "objectGraph": false,
-  "persistentReservation": false,
-  "videoConfig": true
-}
-```
-
 ====
 
-.Read the feature gates
+.Read spec.featureGates on HyperConverged kubevirt-hyperconverged in openshift-cnv. Expect decentralizedLiveMigration and videoConfig true. Expect alignCPUs, containerPathVolumes, declarativeHotplugVolumes, deployKubeSecondaryDNS, disableMDevConfiguration, downwardMetrics, enableMultiArchBootImageImport, incrementalBackup, objectGraph, and persistentReservation false
 [%collapsible]
 ====
 The map above is `spec.featureGates` on this cluster. Two gates are on: `decentralizedLiveMigration` and `videoConfig`. The rest are off.
@@ -123,28 +96,22 @@ Lets a guest issue SCSI Persistent Reserve commands against a shared LUN, and ad
 A VM spec can set the video device under `spec.template.spec.domain.devices.video` (`virtio`, `vga`, `bochs`, `cirrus`, or `ramfb`). If that field is unset, KubeVirt still picks the architecture default.
 ====
 
-.Confirm the rhel9-vm VM
+.Get vm and vmi in rhacs-virt, then print printableStatus of vm rhel9-vm. Expect Running
 [%collapsible]
 ====
-This VM is the production-like audit target for virt-04 and virt-05. Do not delete it and do not patch its spec in this pathway.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get vm,vmi -n rhacs-virt
 oc get vm rhel9-vm -n rhacs-virt -o jsonpath='{.status.printableStatus}{"\n"}'
 ----
-
-TIP: `VirtualMachine` and `VirtualMachineInstance` exist. Status should be `Running`.
 ====
 
-.Open VirtualMachines in the console
+.In the OpenShift console open Virtualization, then VirtualMachines. Enable Show only projects with VirtualMachines and select project rhacs-virt. Expect one Running VM, guest agent reporting, and zero alerts
 [%collapsible]
 ====
 In the OpenShift console tab on the right: *Virtualization* → *VirtualMachines*. Enable *Show only projects with VirtualMachines* and select project `rhacs-virt`. Overview should show one Running VM in the project with guest agent reporting.
 
 image::virt-00-virtualmachines.png[VirtualMachines overview for rhel9-vm,link=self,window=blank,width=100%]
-
-TIP: Zero alerts and one Running VM is a clean baseline before you start scoring controls.
 ====
 
 == Debrief

@@ -42,7 +42,7 @@ Click each step for the full solution.
 
 *Default:* OpenShift Virtualization does not configure pass-through devices. The audit should be empty.
 
-.Audit permittedHostDevices
+.Audit spec.permittedHostDevices on HyperConverged kubevirt-hyperconverged in openshift-cnv. Expect empty. If JSON appears, every pciHostDevices, usbHostDevices, and mediatedDevices entry is a documented exception
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -50,15 +50,11 @@ Click each step for the full solution.
 oc get hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv \
   -o jsonpath='{.spec.permittedHostDevices}{"\n"}'
 ----
-
-TIP: Empty output is a pass. If JSON appears, every `pciHostDevices`, `usbHostDevices`, and `mediatedDevices` entry must be a documented exception.
 ====
 
-.Remediation
+.Remove permittedHostDevices pciHostDevices index 0, or remove spec.permittedHostDevices, on HyperConverged kubevirt-hyperconverged in openshift-cnv
 [%collapsible]
 ====
-Remove a single PCI allow-list entry by index (example: index 0), or remove the entire `permittedHostDevices` stanza.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 Example: drop PCI allow-list index 0 (only if the audit listed devices you do not want)
@@ -74,6 +70,7 @@ oc patch hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n open
   {"op": "remove", "path": "/spec/permittedHostDevices"}
 ]'
 ----
+====
 
 === Control: Make sure KSM is disabled (Level 2 Control)
 
@@ -85,7 +82,7 @@ Kernel Samepage Merging shares identical memory pages across VMs on a host. It c
 
 *Default:* KSM is disabled. `spec.ksmConfiguration` should be empty or clearly not enabling KSM.
 
-.Audit ksmConfiguration
+.Audit spec.ksmConfiguration on HyperConverged kubevirt-hyperconverged in openshift-cnv. Expect empty, or a config that does not enable KSM
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -93,23 +90,15 @@ Kernel Samepage Merging shares identical memory pages across VMs on a host. It c
 oc get hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv \
   -o jsonpath='{.spec.ksmConfiguration}{"\n"}'
 ----
-
-TIP: Empty or a config that does not enable KSM is a pass. If KSM is on, treat it as a Level 2 finding and an explicit density exception.
 ====
 
-.Remediation
+.Edit HyperConverged kubevirt-hyperconverged in openshift-cnv and set spec.ksmConfiguration so KSM is not enabled, then re-run the audit
 [%collapsible]
 ====
-Edit HCO and disable KSM (field names vary slightly by version; set the configuration so KSM is not enabled):
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc edit hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv
 ----
-
-Set `spec.ksmConfiguration` so the feature is off, save, then re-run the audit. Prefer `oc edit` here so you see the live schema instead of guessing a jsonpatch path.
-
-TIP: Do not enable KSM in this lab to "try density."
 ====
 
 === Control: kubevirt seccomp profile mode 700 (Level 1 Control)
@@ -122,11 +111,9 @@ If the KubeVirt seccomp feature is enabled, virt-handler places `kubevirt.json` 
 
 *Default:* `700` when the file exists. If the file is missing, the feature gate is off and you can ignore this check.
 
-.Audit seccomp file mode
+.From each pod in openshift-cnv with label kubevirt.io=virt-handler, stat mode of /proc/1/root/var/lib/kubelet/seccomp/kubevirt/kubevirt.json in container virt-handler. Expect 700, or file absent
 [%collapsible]
 ====
-`stat` from each virt-handler container. If `stat` fails with "No such file", record "not applicable" and continue.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 for pod in $(oc get pod -n openshift-cnv -l kubevirt.io=virt-handler --no-headers -o custom-columns=':metadata.name'); do
@@ -136,23 +123,17 @@ for pod in $(oc get pod -n openshift-cnv -l kubevirt.io=virt-handler --no-header
     || echo "file absent (feature not enabled; skip)"
 done
 ----
-
-TIP: Each existing file should print `700`.
 ====
 
-.Remediation
+.If kubevirt.json exists and the mode is weaker than 700, chmod 700 /proc/1/root/var/lib/kubelet/seccomp/kubevirt/kubevirt.json in that virt-handler pod in openshift-cnv, container virt-handler. Expect 700
 [%collapsible]
 ====
-Only if a file exists and mode is weaker than 700:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 # Replace POD with a virt-handler pod name from the audit
 # oc exec -n openshift-cnv POD -c virt-handler -- \
 #   chmod 700 /proc/1/root/var/lib/kubelet/seccomp/kubevirt/kubevirt.json
 ----
-
-TIP: Re-run the loop. Modes should be `700`.
 ====
 
 === Control: kubevirt-private directory mode 755 (Level 1 Control)
@@ -165,7 +146,7 @@ TIP: Re-run the loop. Modes should be `700`.
 
 *Default:* `755`.
 
-.Audit kubevirt-private mode
+.From each pod in openshift-cnv with label kubevirt.io=virt-handler, stat mode of /var/run/kubevirt-private. Expect 755 or stricter, such as 750 or 700, or path absent
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -177,19 +158,15 @@ for pod in $(oc get pod -n openshift-cnv -l kubevirt.io=virt-handler --no-header
     || echo "path absent (skip)"
 done
 ----
-
-TIP: Each existing directory should print `755` or stricter (for example `750` or `700`).
 ====
 
-.Remediation
+.If /var/run/kubevirt-private is too open, chmod 755 that path on the virt-handler pod in openshift-cnv. Expect 755 or stricter
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 # oc exec -n openshift-cnv POD -- chmod 755 /var/run/kubevirt-private
 ----
-
-TIP: Re-run the loop after chmod on any handler that was too open.
 ====
 
 == Debrief

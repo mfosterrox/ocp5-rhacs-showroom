@@ -17,7 +17,7 @@ This exercise does not run an exploit. You inspect the vulnerable deployment, co
 
 See the CVE on the running Socket.IO deployment, then replace it with `quay.io/smileyfritz/socketio-server:0.1.0-hardened`.
 
-.See what RHACS reports
+.In RHACS Vulnerability Management, filter namespace vulnerable-workload-{workshop_user_suffix} and deployment socketio-server. Review critical and important findings, including python-socketio
 [%collapsible]
 ====
 . In RHACS, open *Vulnerability Management*.
@@ -25,7 +25,7 @@ See the CVE on the running Socket.IO deployment, then replace it with `quay.io/s
 . Review the critical and important findings, including `python-socketio`.
 ====
 
-.List the demo pods
+.List pods in vulnerable-workload-{workshop_user_suffix}. Expect message-broker, socketio-server, and edge-server
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -33,16 +33,12 @@ See the CVE on the running Socket.IO deployment, then replace it with `quay.io/s
 oc get pods -n vulnerable-workload-{workshop_user_suffix} -o wide
 ----
 
-Expect `message-broker`, `socketio-server`, and `edge-server`.
-
 image::fsi-security/vulnerable-pods-running.png[Vulnerable application pods,link=self, window=blank, width=100%]
 ====
 
-.Compare the Containerfiles
+.Compare Containerfiles in vendor/security-response/data/security-new/setup/exercise4/socketio-server/. Vulnerable image uses registry.redhat.io/ubi9/python-311 and python-socketio==5.13.0. Hardened image uses registry.access.redhat.com/hi/python:latest-builder, then registry.access.redhat.com/hi/python:latest, and copies /opt/venv. The lab does not build them
 [%collapsible]
 ====
-The vulnerable image starts from UBI Python, which includes a shell and package tools, and pins the affected library:
-
 [source,dockerfile]
 ----
 FROM registry.redhat.io/ubi9/python-311
@@ -53,8 +49,6 @@ FROM registry.redhat.io/ubi9/python-311
 python-socketio==5.13.0
 ----
 
-The hardened build installs dependencies in a builder stage, then copies the virtualenv onto a Red Hat Hardened Images Python runtime. That runtime stage has no shell. The hardened requirements file does not pin `python-socketio`, so a rebuild takes a current release:
-
 [source,dockerfile]
 ----
 FROM registry.access.redhat.com/hi/python:latest-builder AS builder
@@ -64,12 +58,10 @@ FROM registry.access.redhat.com/hi/python:latest
 COPY --from=builder /opt/venv /opt/venv
 ----
 
-Both Containerfiles are in `vendor/security-response/data/security-new/setup/exercise4/socketio-server/` if you want the full files. The lab does not build them. The next step applies the prebuilt hardened deployment.
-
 image::fsi-security/hardened-image.png[Hardened image,link=self, window=blank, width=100%]
 ====
 
-.Roll out the hardened deployment
+.In namespace vulnerable-workload-{workshop_user_suffix}, apply setup/exercise4/k8s/socketio-server-hardened.yaml, then wait for rollout of deploy/socketio-server and print its image. Expect quay.io/smileyfritz/socketio-server:0.1.0-hardened
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -82,12 +74,10 @@ oc -n "$NAMESPACE" get deploy socketio-server \
   -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 ----
 
-The image line should be `quay.io/smileyfritz/socketio-server:0.1.0-hardened`.
-
 image::fsi-security/hardened-image-running.png[Hardened socketio-server running,link=self, window=blank, width=100%]
 ====
 
-.Confirm the running container has no shell
+.In namespace vulnerable-workload-{workshop_user_suffix}, exec deploy/socketio-server with /bin/bash -c 'echo shell-present'. Expect No shell in the running socketio-server container.
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -99,15 +89,11 @@ else
   echo "No shell in the running socketio-server container."
 fi
 ----
-
-You want the second message. The library defect can still be present in an image. Removing the shell is the control this rollout puts in place.
 ====
 
-.Stretch: replace the community broker image
+.In namespace vulnerable-workload-{workshop_user_suffix}, apply setup/exercise4/k8s/valkey.yaml so deploy/message-broker uses registry.access.redhat.com/hi/valkey:latest, then wait for the rollout
 [%collapsible]
 ====
-`message-broker` is still a community Redis image. `setup/exercise4/k8s/valkey.yaml` points that deployment at `registry.access.redhat.com/hi/valkey:latest`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 export NAMESPACE=vulnerable-workload-{workshop_user_suffix}
@@ -115,8 +101,6 @@ cd ~/ocp5-rhacs-showroom
 envsubst < setup/exercise4/k8s/valkey.yaml | oc apply -f -
 oc -n "$NAMESPACE" rollout status deploy/message-broker
 ----
-
-Catalog to browse later: link:https://images.redhat.com[images.redhat.com^].
 ====
 
 == What you learned

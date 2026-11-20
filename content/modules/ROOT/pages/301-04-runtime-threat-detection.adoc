@@ -35,34 +35,26 @@ Click each step for the full solution.
 
 === Part A: Workload
 
-.Deploy the UBI package-manager probe
+.Apply ~/ocp5-rhacs-showroom/setup/acs-runtime-lab/pkgmgr-probe.yaml, wait for deploy/pkgmgr-probe in namespace 301-04-runtime with timeout 120s, then print route central in namespace stackrox. Expect Running
 [%collapsible]
 ====
-`ubi9/ubi` includes `dnf`. Restricted PSA + `runAsNonRoot`. Leave `301-02-python` running if you still have it—ACS will show both namespaces.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f ~/ocp5-rhacs-showroom/setup/acs-runtime-lab/pkgmgr-probe.yaml
 oc rollout status deploy/pkgmgr-probe -n 301-04-runtime --timeout=120s
 oc get route central -n stackrox -o jsonpath='https://{.spec.host}{"\n"}'
 ----
-
-TIP: Probe `Running`. Open the Central URL for Policy Management.
 ====
 
 === Part B: Clone and enforce
 
-.Find Red Hat Package Manager Execution
+.In Platform Configuration, Policy Management, search policy Red Hat Package Manager Execution (criteria yum, dnf, rpm, microdnf). Expect Runtime and Inform, or disabled
 [%collapsible]
 ====
 In RHACS: **Platform Configuration → Policy Management**. Search **Red Hat Package Manager Execution** (criteria include `yum` / `dnf` / `rpm` / `microdnf`).
-
-If you already cloned the Alpine policy in acs-06, leave it. This clone is the UBI equivalent.
-
-TIP: Open the policy and confirm it is **Runtime** capable and currently **Inform** (or disabled). You will clone, not edit the default.
 ====
 
-.Clone with Inform and enforce at Runtime
+.Clone the policy as "Red Hat Package Manager Execution - Runtime", set lifecycle Runtime, enable Inform and enforce, and set enforcement to Enforce at Runtime
 [%collapsible]
 ====
 **Actions → Clone policy**. Name:
@@ -76,16 +68,14 @@ Then **Policy Behavior → Actions**:
 
 * Lifecycle: **Runtime**
 * Enable **Inform and enforce**
-* Enforcement: **Enforce at Runtime** (kills the pod; it does not scale the Deployment to zero)
+* Enforcement: **Enforce at Runtime**
 
 Save the policy.
-
-TIP: Same click path as xref:acs-06-network-and-runtime.adoc#runtime-enforce[acs-06 runtime enforce], different policy name.
 ====
 
 === Part C: Trigger the kill
 
-.Watch events, then exec the package manager
+.In one terminal, watch events in namespace 301-04-runtime. In a second terminal, exec dnf --version or microdnf --version or yum --version in the pod labeled app=pkgmgr-probe in namespace 301-04-runtime. Expect exit 137 and Killing
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -93,26 +83,20 @@ TIP: Same click path as xref:acs-06-network-and-runtime.adoc#runtime-enforce[acs
 oc get events -n 301-04-runtime -w
 ----
 
-In a second terminal:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 POD=$(oc get pod -l app=pkgmgr-probe -n 301-04-runtime -o jsonpath='{.items[0].metadata.name}')
 oc exec "$POD" -n 301-04-runtime -- /bin/bash -c 'dnf --version || microdnf --version || yum --version'
 ----
-
-TIP: The exec session ends (often exit 137). Events show RHACS **Killing** the pod and the Deployment creating a replacement. In Central **Violations**, filter policy name and namespace `301-04-runtime`.
 ====
 
-.Optional: confirm the Python app is still the catalog image
+.Print the container image of deploy/python-app in namespace 301-02-python, or expect "301-02-python not deployed (optional)"
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get deploy python-app -n 301-02-python -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}' 2>/dev/null || echo "301-02-python not deployed (optional)"
 ----
-
-TIP: If 301-02 is up, you now have a digest-pinned Python service *and* a UBI probe ACS will kill. Hunt both in xref:301-05-incident-response-forensics.adoc[301-05].
 ====
 
 == Debrief

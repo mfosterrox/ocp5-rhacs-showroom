@@ -240,7 +240,7 @@ We scanned `frontend:0.1` in Quay before go-live. Show me proof the patient-port
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Confirm the deployment image reference
+.Print the image of deploy frontend in namespace patient-portal. Expect {quay_url}/{quay_user}/frontend:0.1
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -251,11 +251,9 @@ echo "Expected: {quay_url}/{quay_user}/frontend:0.1"
 ----
 ====
 
-.Step 2 — Inspect pod pull events
+.Describe pods in namespace patient-portal with label app=frontend and grep Image, Pull, Pulling, Pulled, Failed, and Back-off. Expect Pulling and Pulled for frontend:0.1
 [%collapsible]
 ====
-Check where OpenShift pulled the image from.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc describe pod -n patient-portal -l app=frontend | grep -E 'Image:|Pull|Pulling|Pulled|Failed|Back-off'
@@ -270,11 +268,9 @@ oc describe pod -n patient-portal -l app=frontend | grep -E 'Image:|Pull|Pulling
 ----
 ====
 
-.Step 3 — Compare Quay digest to running pods
+.Compare the podman digest of {quay_url}/{quay_user}/frontend:0.1 with the imageID of pods labeled app=frontend in namespace patient-portal. Expect the same sha256 prefix
 [%collapsible]
 ====
-The `imageID` on the pod should include the same digest prefix (`sha256:...`) as the Quay manifest.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 podman inspect --format='Quay digest: {{.Digest}}' {quay_url}/{quay_user}/frontend:0.1
@@ -282,11 +278,9 @@ oc get pod -n patient-portal -l app=frontend -o jsonpath='{range .items[*]}{.met
 ----
 ====
 
-.Step 4 — Cross-check with RHACS
+.Scan image {quay_url}/{quay_user}/frontend:0.1 with roxctl at $ROX_CENTRAL_ADDRESS:443, --insecure-skip-tls-verify, GRPC_ENFORCE_ALPN_ENABLED=false, output table, and show the first 15 lines
 [%collapsible]
 ====
-Confirm the scanned image matches what you deployed.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 GRPC_ENFORCE_ALPN_ENABLED=false \
@@ -517,29 +511,32 @@ We have irregular egress traffic from `payment-gateway` on the production cluste
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Open RHACS and switch to your namespace
+.Open {acs_route} and switch to project payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
-include::partial$payment-gateway-namespace.adoc[]
+[source,sh,subs="attributes",role=execute]
+----
+oc project payment-gateway-{workshop_user_suffix}
+----
 
 image::fsi-security/sarah-call.png[Incident call,link=self, window=blank, width=100%]
 
 . Log in to the RHACS console at `{acs_route}[{acs_route}^]`.
 ====
 
-.Step 2 — Search for payment-gateway in Risk
+.In Risk, search for payment-gateway
 [%collapsible]
 ====
 . Use *Risk* in the left navigation and search for `payment-gateway`.
 ====
 
-.Step 3 — Open the deployment
+.Open deployment payment-gateway in namespace payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
 . Select the `payment-gateway` deployment in namespace `payment-gateway-{workshop_user_suffix}`.
 ====
 
-.Step 4 — Review risk factors
+.Review external exposure, suspicious processes, and configuration issues for Deployment:payment-gateway Namespace:payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
 . Review the risk factors: external exposure, suspicious processes, and configuration issues.

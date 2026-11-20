@@ -24,7 +24,7 @@ Confirm you can open this cluster and see the two namespaces this workshop uses.
 * The roadshow home page setup script has been run (`setup/lab-environment.sh`)
 * Console URLs and passwords from the xref:ROOT:index.adoc[home page]
 
-.Sign in to OpenShift
+.Sign in to the OpenShift console at {openshift_cluster_console_url} as {openshift_cluster_admin_username} with the password on the home page
 [%collapsible]
 ====
 . Open the *OpenShift Console* tab, or go to `{openshift_cluster_console_url}`.
@@ -33,7 +33,7 @@ Confirm you can open this cluster and see the two namespaces this workshop uses.
 image::fsi-security/acme-cluster.png[OpenShift console,link=self, window=blank, width=100%]
 ====
 
-.Confirm your namespaces
+.Run oc whoami, then list pods in payment-gateway-{workshop_user_suffix} and vulnerable-workload-{workshop_user_suffix}. Expect running pods in both. If a namespace is missing, the instructor runs ./setup/deploy-incident-env.sh
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -42,13 +42,9 @@ oc whoami
 oc get pods -n payment-gateway-{workshop_user_suffix}
 oc get pods -n vulnerable-workload-{workshop_user_suffix}
 ----
-
-`payment-gateway-{workshop_user_suffix}` is the workload from the incident. `vulnerable-workload-{workshop_user_suffix}` is the Socket.IO demo you harden later.
-
-Both commands should list running pods. If a namespace is missing, ask the instructor to run `./setup/deploy-incident-env.sh`.
 ====
 
-.Open RHACS
+.Sign in to RHACS at {acs_route} as {acs_portal_username} with the password on the home page
 [%collapsible]
 ====
 . Open the *Red Hat Advanced Cluster Security* tab, or go to `{acs_route}[{acs_route}^]`.

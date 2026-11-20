@@ -217,14 +217,14 @@ We need alerts on Unauthorized Process Execution for payment gateway—same patt
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Configure a notifier integration
+.In Platform Configuration, Integrations, create or reuse a Slack, Teams, or email notifier
 [%collapsible]
 ====
 . In RHACS, go to *Platform Configuration* → *Integrations*.
 . Create or reuse a notifier (Slack, Teams, or email) following the steps earlier in this module.
 ====
 
-.Step 2 — Create a notification rule
+.Create a notification rule for Unauthorized Process Execution, severity High or above, namespace payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
 . Create a notification rule targeting:
@@ -233,18 +233,16 @@ include::partial$security-exercise-task-intro.adoc[]
 ** Scope: namespace `payment-gateway-{workshop_user_suffix}`
 ====
 
-.Step 3 — Trigger a test violation
+.Exec /bin/bash -c "echo notification test" on pod/payment-gateway in namespace payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
-. Trigger a test by running shell exec:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc exec -n payment-gateway-{workshop_user_suffix} -it pod/payment-gateway -- /bin/bash -c "echo notification test"
 ----
 ====
 
-.Step 4 — Confirm the alert fired
+.Confirm the violation in Violations and that the notifier fires
 [%collapsible]
 ====
 . Confirm the violation appears in RHACS *Violations* and that your notifier fires.

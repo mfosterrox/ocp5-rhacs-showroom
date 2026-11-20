@@ -53,7 +53,7 @@ The `nonRoot` feature gate makes virt-launcher run without root. From OpenShift 
 
 *Default:* Non-root is the KubeVirt default. From 4.18 the gate is deprecated and always enabled.
 
-.Audit nonRoot
+.Audit featureGates.nonRoot on HyperConverged kubevirt-hyperconverged in openshift-cnv, then show the kubevirt-hyperconverged-operator CSV version. Expect nonRoot=true on pre-4.18. On 4.18 or later expect nonRoot= empty and skip the patch
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -63,23 +63,17 @@ oc get hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n opensh
 oc get csv -n openshift-cnv -o custom-columns=NAME:.metadata.name,VERSION:.spec.version --no-headers \
   | grep '^kubevirt-hyperconverged-operator'
 ----
-
-TIP: `nonRoot=true` is the pass on pre-4.18. On 4.18+ `nonRoot=` may be empty. Operator version 4.18 or later means non-root is already enforced, so skip the patch. Ignore other CSVs in this namespace.
 ====
 
-.Remediation (pre-4.18 only)
+.On pre-4.18, patch HyperConverged kubevirt-hyperconverged in openshift-cnv so spec.featureGates.nonRoot is true. Expect true. Skip this patch on 4.18 or later
 [%collapsible]
 ====
-Skip this patch on 4.18+. On older clusters set the gate to `true`:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc patch hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv --type='json' -p='[
   {"op": "replace", "path": "/spec/featureGates/nonRoot", "value": true}
 ]'
 ----
-
-TIP: Re-run the audit. Output should be `true`.
 ====
 
 === Control: Disable persistentReservation (Level 1 Control)
@@ -92,7 +86,7 @@ Persistent SCSI reservations share a LUN among VMs. They exist for Windows Share
 
 *Default:* Disabled (`false`).
 
-.Audit persistentReservation
+.Audit featureGates.persistentReservation on HyperConverged kubevirt-hyperconverged in openshift-cnv. Expect false or empty
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -100,23 +94,17 @@ Persistent SCSI reservations share a LUN among VMs. They exist for Windows Share
 oc get hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv \
   -o jsonpath='{.spec.featureGates.persistentReservation}{"\n"}'
 ----
-
-TIP: `false` or empty is a pass. Do not enable this gate to "see what happens" on a shared cluster.
 ====
 
-.Remediation
+.If persistentReservation is true and this cluster does not run Windows Shared Cluster Filesystem, patch HyperConverged kubevirt-hyperconverged in openshift-cnv so spec.featureGates.persistentReservation is false. Expect false
 [%collapsible]
 ====
-Only if the audit returned `true` and you do not run Windows Shared Cluster Filesystem:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc patch hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv --type='json' -p='[
   {"op": "replace", "path": "/spec/featureGates/persistentReservation", "value": false}
 ]'
 ----
-
-TIP: Audit should return `false`.
 ====
 
 === Control: Disable downwardMetrics (Level 1 Control)
@@ -129,7 +117,7 @@ TIP: Audit should return `false`.
 
 *Default:* `false`.
 
-.Audit downwardMetrics
+.Audit featureGates.downwardMetrics on HyperConverged kubevirt-hyperconverged in openshift-cnv. Expect false or empty
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -137,23 +125,17 @@ TIP: Audit should return `false`.
 oc get hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv \
   -o jsonpath='{.spec.featureGates.downwardMetrics}{"\n"}'
 ----
-
-TIP: `false` or empty is a pass.
 ====
 
-.Remediation
+.If downwardMetrics is true, patch HyperConverged kubevirt-hyperconverged in openshift-cnv so spec.featureGates.downwardMetrics is false. Expect false
 [%collapsible]
 ====
-Only if the audit returned `true`:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc patch hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv --type='json' -p='[
   {"op": "replace", "path": "/spec/featureGates/downwardMetrics", "value": false}
 ]'
 ----
-
-TIP: Audit should return `false`.
 ====
 
 === Control: Enforce trusted registries using TLS (Level 1 Control)
@@ -166,7 +148,7 @@ TIP: Audit should return `false`.
 
 *Default:* No insecure registries. The jsonpath should be empty.
 
-.Audit insecureRegistries
+.Audit spec.storageImport.insecureRegistries on HyperConverged kubevirt-hyperconverged in openshift-cnv. Expect empty. Any hostname is a finding
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -174,23 +156,17 @@ TIP: Audit should return `false`.
 oc get hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv \
   -o jsonpath='{.spec.storageImport.insecureRegistries}{"\n"}'
 ----
-
-TIP: Empty output is a pass. Any hostname listed is a finding.
 ====
 
-.Remediation
+.If spec.storageImport.insecureRegistries is populated, remove it from HyperConverged kubevirt-hyperconverged in openshift-cnv. Expect empty
 [%collapsible]
 ====
-Remove the entire allow-list (only if it is populated and you intend to break those HTTP imports):
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc patch hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv --type='json' -p='[
   {"op": "remove", "path": "/spec/storageImport/insecureRegistries"}
 ]'
 ----
-
-TIP: Re-run the audit. It should print nothing.
 ====
 
 === Control: Restrict HCO jsonpatch annotations (Level 1 Control)
@@ -211,7 +187,7 @@ The gate makes the device available. A virtual machine receives it when `spec.do
 
 *This cluster:* `kubevirt` is `true`. Read the value and confirm it only adds `VSOCK`. Leave that annotation. `cdi`, `network`, and `ssp` stay `false`.
 
-.Audit jsonpatch annotations
+.Audit jsonpatch annotations on HyperConverged kubevirt-hyperconverged in openshift-cnv, then print kubevirt.kubevirt.io/jsonpatch. Expect cdi, network, and ssp false, and kubevirt true with [{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"VSOCK"}]. Any other operation is a finding
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -228,17 +204,11 @@ oc get hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n opensh
 oc get hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged -n openshift-cnv \
   -o jsonpath='{.metadata.annotations.kubevirt\.kubevirt\.io/jsonpatch}{"\n"}'
 ----
-
-TIP: `cdi`, `network`, and `ssp` are `false`. `kubevirt` is `true`. The printed patch is the VSOCK add: `[{"op":"add","path":"/spec/configuration/developerConfiguration/featureGates/-","value":"VSOCK"}]`. Any other operation in that string is a finding.
 ====
 
-.Remediation
+.On HyperConverged kubevirt-hyperconverged in openshift-cnv, remove containerizeddataimporter.kubevirt.io/jsonpatch, networkaddonsconfigs.kubevirt.io/jsonpatch, and ssp.kubevirt.io/jsonpatch when cdi, network, or ssp is true. If kubevirt.kubevirt.io/jsonpatch is anything besides the VSOCK add, remove that annotation too. Leave the VSOCK add. Expect kubevirt true with VSOCK, and cdi, network, and ssp false
 [%collapsible]
 ====
-Leave the VSOCK annotation in place. It is what lets Sensor collect guest package inventory for the RHACS VM exercise. Removing it stops that collection. The next sync of `rhacs-virt` writes the same annotation again.
-
-Remove a key only when it is unexpected. That means `cdi`, `network`, or `ssp` is `true`. The trailing `-` removes that annotation. This command leaves the VSOCK key alone:
-
 [source,bash,subs="+macros,+attributes"]
 ----
 oc annotate --overwrite -n openshift-cnv hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged \
@@ -247,15 +217,11 @@ oc annotate --overwrite -n openshift-cnv hyperconvergeds.v1beta1.hco.kubevirt.io
   'ssp.kubevirt.io/jsonpatch-'
 ----
 
-If the kubevirt value contains anything besides the VSOCK add, clear it and tell an instructor. `rhacs-virt` will restore the VSOCK add on the next sync:
-
 [source,bash,subs="+macros,+attributes"]
 ----
 oc annotate --overwrite -n openshift-cnv hyperconvergeds.v1beta1.hco.kubevirt.io kubevirt-hyperconverged \
   'kubevirt.kubevirt.io/jsonpatch-'
 ----
-
-TIP: Re-run the audit. `kubevirt` stays `true` with the VSOCK add. The other three stay `false`.
 ====
 
 == Debrief

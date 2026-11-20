@@ -76,8 +76,6 @@ oc get secret app-db-creds -o yaml --as=dev-user
 oc get secret app-db-creds -o jsonpath='{.data.password}' --as=dev-user | base64 -d; echo
 ----
 
-IMPORTANT: The password prints in cleartext. That is credential theft from a “developer” grant.
-
 === Persist by forging a RoleBinding
 `admin` can create RoleBindings. The attacker binds themselves again (or a second identity) so access survives a later cleanup of the original binding.
 
@@ -91,7 +89,7 @@ oc create rolebinding attacker-persist --clusterrole=admin --user=dev-user --as=
 oc get rolebindings --as=dev-user
 ----
 
-IMPORTANT: `attacker-persist` exists. Foothold is now self-reinforcing inside the namespace.
+NOTE: `attacker-persist` exists. Foothold is now self-reinforcing inside the namespace.
 
 === Deploy a foothold workload
 The same grant can mutate workloads. Drop a long-running pod the attacker controls.
@@ -107,8 +105,6 @@ oc create deployment foothold \
 ----
 oc get deploy,pods --as=dev-user
 ----
-
-IMPORTANT: `foothold` is running. Namespace admin was enough—no `cluster-admin` required.
 
 === Widen the blast radius with a privileged ServiceAccount
 If someone also bound a ClusterRole to the default app SA, a single compromised pod becomes a Secret harvester. Simulate that mistake, then confirm the SA can list Secrets.
@@ -131,11 +127,9 @@ Stop the same attack without blocking legitimate work. Remove the over-permissio
 
 Click each step for the full solution.
 
-.Delete the broken RoleBindings and foothold Deployment
+.Delete RoleBindings broken-dev-admin, attacker-persist, and sa-too-much, and deployment foothold, then list RoleBindings. Expect those three bindings gone
 [%collapsible]
 ====
-Delete the attacker's bindings and foothold so you are defending a clean slate.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc delete rolebinding broken-dev-admin attacker-persist sa-too-much --ignore-not-found
@@ -146,15 +140,11 @@ oc delete deployment foothold --ignore-not-found
 ----
 oc get rolebindings
 ----
-
-TIP: Only platform/default bindings should remain for this project (no `broken-dev-admin`, `attacker-persist`, or `sa-too-much`).
 ====
 
-.Bind view to dev-user and re-run can-i
+.Create RoleBinding dev-view granting ClusterRole view to user dev-user, then as dev-user check get pods, create deployment, and Secret app-db-creds. Expect yes, no, and denied
 [%collapsible]
 ====
-Bind `view` and re-run the attacker's checks. Reads of ordinary objects may work; Secret data and deployments must not.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create rolebinding dev-view --clusterrole=view --user=dev-user
@@ -170,17 +160,11 @@ oc auth can-i create deployment --as=dev-user
 ----
 oc get secret app-db-creds -o jsonpath='{.data.password}' --as=dev-user || true
 ----
-
-TIP: get pods = yes; create deployment = no; Secret password request denied (no cleartext).
 ====
 
-.Replace view with edit and test RoleBinding create
+.Delete RoleBinding dev-view, create RoleBinding dev-edit granting ClusterRole edit to user dev-user, then as dev-user check create deployment and create rolebinding. Expect yes and no
 [%collapsible]
 ====
-Developers need to ship changes. `edit` allows Deployments but must *not* allow forging RoleBindings -- that was the persistence step in the attack.
-
-NOTE: Built-in `edit` *can* read Secret data. Closing Secret theft for editors needs a tighter custom Role (later modules) or keeping day-to-day humans on `view` plus a break-glass path. This step stops the *self-escalation* the attacker used.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc delete rolebinding dev-view
@@ -192,15 +176,11 @@ oc create rolebinding dev-edit --clusterrole=edit --user=dev-user
 oc auth can-i create deployment --as=dev-user
 oc auth can-i create rolebinding --as=dev-user
 ----
-
-TIP: create deployment = yes; create rolebinding = no (persistence path closed).
 ====
 
-.Create deployment sample as dev-user
+.Create deployment sample from registry.access.redhat.com/ubi9/ubi running sleep infinity as dev-user, then get deploy sample as dev-user. Expect deployment sample
 [%collapsible]
 ====
-Security that locks the team out gets rolled back. Confirm `dev-user` can operate an honest Deployment under `edit`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc create deployment sample \
@@ -212,28 +192,20 @@ oc create deployment sample \
 ----
 oc get deploy sample --as=dev-user
 ----
-
-TIP: `sample` should exist when queried `--as=dev-user`.
 ====
 
-.Confirm app-sa cannot list Secrets
+.Confirm service account system:serviceaccount:101-03-r-rbac:app-sa cannot list secrets. Expect no
 [%collapsible]
 ====
-Do not re-bind `edit` to `app-sa`. Confirm the compromised-pod path from the attack is closed.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc auth can-i list secrets --as=system:serviceaccount:101-03-r-rbac:app-sa
 ----
-
-TIP: Result is denied until you explicitly bind that power for a documented reason.
 ====
 
-.Bind admin to dev-user and test RoleBinding and Secret delete
+.Delete RoleBinding dev-edit, create RoleBinding dev-admin granting ClusterRole admin to user dev-user, then as dev-user check create rolebinding and delete secret. Expect yes and yes
 [%collapsible]
 ====
-Namespace `admin` is still the right tool for RoleBindings and Secret management -- use it as deliberate, auditable elevation, not a default developer badge. Verify what it unlocks *inside this project only*.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc delete rolebinding dev-edit
@@ -245,8 +217,6 @@ oc create rolebinding dev-admin --clusterrole=admin --user=dev-user
 oc auth can-i create rolebinding --as=dev-user
 oc auth can-i delete secret --as=dev-user
 ----
-
-TIP: Both are permitted *within the namespace only*. Prefer leaving day-to-day developers on `edit` and elevating to `admin` only for stewardship tasks.
 ====
 
 == Debrief

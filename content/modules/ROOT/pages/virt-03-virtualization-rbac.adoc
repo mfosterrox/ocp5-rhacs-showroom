@@ -44,7 +44,7 @@ Click each step for the full solution.
 
 *Default:* Cluster administrators *and* namespace administrators can trigger migrations. Tightening this is an explicit RBAC change, not a hidden default.
 
-.Audit who can create migrations
+.Show who can create vmim and who can create migrationpolicy. Expect system:masters, system:cluster-admin, kubevirt controller service accounts, and possibly system:serviceaccounts:openshift-cnv. Extra User names are the finding
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -53,15 +53,11 @@ oc adm policy who-can create vmim
 echo '---'
 oc adm policy who-can create migrationpolicy
 ----
-
-TIP: Expect `system:masters` and `system:cluster-admin`, kubevirt controller service accounts, and possibly `system:serviceaccounts:openshift-cnv`. Extra *User* names are the finding.
 ====
 
-.Remediation
+.For an extra user test bound by ClusterRoleBinding migration-creator, find that binding and delete clusterrolebinding migration-creator. Leave kubevirt operator bindings. Expect oc auth can-i create migrationpolicies --as test to print no
 [%collapsible]
 ====
-Example: a user `test` was bound via ClusterRoleBinding `migration-creator`. Find the binding, then delete *that* extra binding -- not the kubevirt operator bindings.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 # oc adm policy who-can create migrationpolicy
@@ -70,10 +66,6 @@ Example: a user `test` was bound via ClusterRoleBinding `migration-creator`. Fin
 # oc delete clusterrolebinding migration-creator
 # oc auth can-i create migrationpolicies --as test
 ----
-
-Leave these commented unless you identified a binding you created. Deleting operator RoleBindings breaks CNV.
-
-TIP: After a justified delete, `oc auth can-i ... --as <user>` should print `no`.
 ====
 
 === Control: Restrict exec access to pods (Level 1 Control)
@@ -86,23 +78,19 @@ TIP: After a justified delete, `oc auth can-i ... --as <user>` should print `no`
 
 *Default:* Exec is reserved for cluster administrators.
 
-.Audit who can exec
+.Show who can exec pod. Expect cluster-admin and system groups. Extra users or system:authenticated is a finding
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc adm policy who-can exec pod
 ----
-
-TIP: Cluster-admin and a short list of system groups is the expected pass. Extra users or `system:authenticated` would be a finding. This is cluster-wide; virt pods are not special-cased by the API.
 ====
 
-.Remediation
+.Do not grant pods/exec to system:authenticated. Remove RoleBindings that add exec for virt namespaces when the person only needs guest SSH or cloud-init
 [%collapsible]
 ====
 Do not grant `pods/exec` to `system:authenticated`. Remove RoleBindings that add exec for virt namespaces to people who only need VM console or SSH into the *guest*.
-
-TIP: Guest access belongs in the guest (SSH, cloud-init users), not `oc exec` in virt-launcher.
 ====
 
 === Control: Restrict VNC access to cluster workloads (Level 1 Control)
@@ -115,7 +103,7 @@ The kubevirt token subresource (`token.kubevirt.io:generate`) is how the UI and 
 
 *Default:* No extra bindings. The query returns an empty list unless someone created one.
 
-.Audit VNC token RoleBindings
+.List RoleBindings and ClusterRoleBindings whose roleRef.name contains token.kubevirt.io:generate. Expect empty, or only an approved user or group, not system:authenticated
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -126,21 +114,15 @@ oc get rolebinding,clusterrolebinding -A -o json | jq -c '
   | {kind, ns: .metadata.namespace, name: .metadata.name, subjects}
 '
 ----
-
-TIP: Empty output is a pass. Any item should name an approved user or group, not a wide group like `system:authenticated`.
 ====
 
-.Remediation
+.Delete RoleBinding BINDING in NAMESPACE when it is not an approved token.kubevirt.io:generate binding, then re-run the jq filter. Expect only approved subjects
 [%collapsible]
 ====
-Delete or subject-trim bindings that are not approved. Example:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 # oc delete rolebinding BINDING -n NAMESPACE
 ----
-
-TIP: Re-run the `jq` filter. Only approved subjects should remain.
 ====
 
 === Control: Restrict create and update of cluster instance types and preferences (Level 1 Control)
@@ -153,7 +135,7 @@ TIP: Re-run the `jq` filter. Only approved subjects should remain.
 
 *Default:* Create/update is cluster-admin only.
 
-.Audit who can mutate cluster instance types
+.Show who can create and who can update virtualmachineclusterinstancetypes. Expect cluster-admin and kubevirt controllers. Extra users are the finding. Repeat with virtualmachineclusterpreferences if that resource exists
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -162,16 +144,12 @@ oc adm policy who-can create virtualmachineclusterinstancetypes
 echo '---'
 oc adm policy who-can update virtualmachineclusterinstancetypes
 ----
-
-TIP: Cluster-admin and kubevirt controllers are expected. Extra users are the finding. Repeat with `virtualmachineclusterpreferences` if that resource exists on your version.
 ====
 
-.Remediation
+.Remove create and update of virtualmachineclusterinstancetypes from people who should only consume them. Bind get, list, and use instead. Leave kubevirt operator bindings. Expect who-can to shrink to admins plus controllers
 [%collapsible]
 ====
 Remove create/update from people who should only *consume* instance types (bind `get`/`list`/`use` instead). Do not delete the kubevirt operator bindings.
-
-TIP: `who-can` should shrink to admins plus controllers.
 ====
 
 === Control: Restrict update access to the CDI CR (Level 1 Control)
@@ -184,23 +162,19 @@ The Containerized Data Importer object is cluster-scoped and holds sensitive imp
 
 *Default:* Update is not granted to ordinary users.
 
-.Audit who can update CDI
+.Show who can update cdi. Expect cluster-admin and the CNV and CDI operators. Extra User entries are the finding
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc adm policy who-can update cdi
 ----
-
-TIP: Cluster-admin and the CNV/CDI operators are the pass. Extra *User* entries are the finding.
 ====
 
-.Remediation
+.Remove update on cdi from non-admin ClusterRoles you do not need. Leave the operator ClusterRole. Expect the extra user to disappear from who-can
 [%collapsible]
 ====
 Remove update verbs on `cdi` from non-admin ClusterRoles you do not need. Do not edit the operator's own ClusterRole.
-
-TIP: Re-run `who-can`. The extra user should disappear.
 ====
 
 == Debrief

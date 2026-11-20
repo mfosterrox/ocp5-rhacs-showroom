@@ -29,11 +29,9 @@ SPO and RHACS still matter for runtime and image risk; this hour is the audit-lo
 
 Click each step for the full solution.
 
-.List Compliance Operator pods and the ocp4-cis profile
+.List pods in openshift-compliance and profiles matching ocp4-cis. Expect Running pods and an ocp4-cis profile, not only ocp4-cis-node
 [%collapsible]
 ====
-You want the **ocp4-cis** *platform* profile (API config), not `ocp4-cis-node` (RHCOS node scans). The API-server audit-log rules live on the platform profile.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get pods -n openshift-compliance
@@ -43,15 +41,11 @@ oc get pods -n openshift-compliance
 ----
 oc get profiles.compliance.openshift.io -n openshift-compliance | grep -E 'ocp4-cis$|NAME'
 ----
-
-TIP: Pods should be Running. The grep should show an `ocp4-cis` profile (not only `-node`).
 ====
 
-.List existing CIS scans and count audit-log results
+.List ScanSettingBindings, ComplianceSuites, and ComplianceScans in openshift-compliance, then count results matching audit-log, audit-logging, or log-forward. Expect a count. If it is greater than 0, skip the next apply
 [%collapsible]
 ====
-Roadshow clusters often have a daily suite (for example `acs-catch-all`). Use those results if they exist.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get scansettingbindings,compliancesuites,compliancescans -n openshift-compliance
@@ -63,15 +57,11 @@ oc get compliancecheckresults -n openshift-compliance --no-headers 2>/dev/null \
   | grep -cE 'audit-log|audit-logging|log-forward' \
   || echo 0
 ----
-
-TIP: If the count is greater than 0, skip the next apply and go to the audit-rule filter. If it is 0, bind `ocp4-cis` in the next step.
 ====
 
-.Apply ScanSettingBinding 101-10-cis-audit
+.Apply ScanSettingBinding 101-10-cis-audit in openshift-compliance for Profile ocp4-cis and ScanSetting default. Skip this if the audit-log count was already greater than 0
 [%collapsible]
 ====
-This binds the CIS *platform* profile to the operator's default `ScanSetting`. Do not use RHCOS content for these API-server audit rules. Skip this apply if the previous count was already greater than 0.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<'EOF'
@@ -90,28 +80,20 @@ settingsRef:
   apiGroup: compliance.openshift.io/v1alpha1
 EOF
 ----
-
-TIP: `scansettingbinding.compliance.openshift.io/101-10-cis-audit created` (or configured).
 ====
 
-.Wait until the CIS scan is DONE
+.List ComplianceScans in openshift-compliance. Expect phase DONE
 [%collapsible]
 ====
-A full CIS platform scan can take several minutes. Re-run until the scan tied to this binding is `DONE`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get compliancescans -n openshift-compliance
 ----
-
-TIP: Phase `DONE` means results are ready. `RUNNING` means wait and re-check.
 ====
 
-.List audit-log ComplianceCheckResults
+.List ComplianceCheckResults in openshift-compliance matching audit-log, audit-logging, or log-forward. Expect PASS, FAIL, or MANUAL
 [%collapsible]
 ====
-These rule names are the OpenShift CIS equivalent of the Kubernetes CIS rows you used in 101-09.
-
 [cols="1,2",options="header"]
 |===
 |CIS OCP 1.7 (Kubernetes CIS in parentheses) |Typical ComplianceCheckResult name (scan prefix may vary)
@@ -138,31 +120,21 @@ oc get compliancecheckresults -n openshift-compliance --no-headers \
   | grep -iE 'audit-log|audit-logging|log-forward' \
   || echo 'No audit-log results yet -- wait for the scan, then re-run.'
 ----
-
-PASS means that CIS row is met. FAIL or MANUAL is what you highlight next.
-
-What to explain: this is the same evidence as listing `/var/log/kube-apiserver/` in 101-09, scored as a control. Path PASS plus forwarding FAIL means you can hunt today and still lose the trail on the node.
 ====
 
-.List non-PASS audit-log rules
+.List non-PASS ComplianceCheckResults in openshift-compliance matching audit-log, audit-logging, or log-forward, printing name, status, and severity. Expect empty output if every match passed
 [%collapsible]
 ====
-Print the name, status, and severity for audit rules that did **not** pass.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get compliancecheckresults -n openshift-compliance --no-headers \
   | awk 'tolower($0) ~ /audit-log|audit-logging|log-forward/ && toupper($2) != "PASS" {print $1, $2, $3}'
 ----
-
-TIP: Empty output means every matching audit-log rule PASSed.
 ====
 
-.Print instructions for those FAIL rows
+.Print name, status, severity, and instructions for non-PASS ComplianceCheckResults in openshift-compliance matching audit-log, audit-logging, or log-forward. Do not apply unsupportedConfigOverrides
 [%collapsible]
 ====
-Highlight FAIL instructions, not every PASS. Do **not** apply `unsupportedConfigOverrides` in this lab.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get compliancecheckresults -n openshift-compliance -o json \
@@ -173,21 +145,11 @@ oc get compliancecheckresults -n openshift-compliance -o json \
     | "===== \(.metadata.name)  status=\(.status)  severity=\(.severity) =====\n\(.instructions // .description)\n"
   '
 ----
-
-What the FAILs usually mean (do **not** apply `unsupportedConfigOverrides` in this lab):
-
-* **audit-log-path** — kube-apiserver must write `/var/log/kube-apiserver/audit.log` (you listed that directory in 101-09). A FAIL here is unusual on a stock OpenShift cluster; escalate to the platform owner.
-* **audit-log-maxsize / maxbackup** — CIS wants rotation (about 100 MiB files, about 10 backups). OpenShift sets these by default. If the check still FAILs, treat it as a platform-operator finding for xref:201-07-compliance-tailoring.adoc[201-07], not a DIY kube-apiserver edit.
-* **audit-log-forwarding-enabled** (CIS OpenShift **1.2.21**) — logs stay on the masters until Cluster Logging / a SIEM ships them off-cluster. That is the common roadshow FAIL. Fix: configure a `ClusterLogForwarder` to Splunk (xref:201-06-audit-monitoring-correlation.adoc[201-06]), then re-scan in xref:201-07-compliance-tailoring.adoc[201-07] to record PASS. Do not copy files off by hand.
-
-What to explain: highlight the FAIL instructions, not every PASS. The change that usually matters after 101-09 is *shipping* the files you already grepped—not editing kube-apiserver flags.
 ====
 
-.Read live audit-log flags from kubeapiserver cluster
+.Show audit-log-path, audit-log-maxsize, audit-log-maxbackup, and audit-log-maxage from kubeapiserver cluster. Expect path /var/log/kube-apiserver/audit.log
 [%collapsible]
 ====
-Same object 101-09 used for "is the path set?" Now you can line it up with the scan.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get kubeapiserver cluster -o json \
@@ -197,7 +159,6 @@ oc get kubeapiserver cluster -o json \
          maxbackup: ."audit-log-maxbackup",
          maxage: ."audit-log-maxage"}'
 ----
-TIP: If `path` is `/var/log/kube-apiserver/audit.log` and the scan still FAILs forwarding, the files you grepped in 101-09 are real—but they are not the *archive*. CIS wants them off the node.
 ====
 
 == Debrief

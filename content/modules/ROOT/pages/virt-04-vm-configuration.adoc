@@ -42,7 +42,7 @@ Attaching a GPU, NVMe, or other host device maps that hardware into the guest. P
 
 *Default:* No `gpus` or `hostDevices` on `spec.template.spec.domain.devices`.
 
-.Audit GPUs and hostDevices on all VMs
+.List VirtualMachines whose spec.template.spec.domain.devices.gpus or hostDevices is non-empty. Expect empty aside from the --- hostDevices --- separator
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -59,36 +59,26 @@ oc get vm -A -o json | jq -c '
   | {vm: (.metadata.namespace + "/" + .metadata.name), hostDevices: .spec.template.spec.domain.devices.hostDevices}
 '
 ----
-
-TIP: Empty output (aside from the separator) is a pass. Any JSON object is a VM with pass-through to review.
 ====
 
-.Audit rhel9-vm only
+.Print gpus and hostDevices on vm rhel9-vm in rhacs-virt. Expect both empty
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get vm rhel9-vm -n rhacs-virt -o jsonpath='gpus={.spec.template.spec.domain.devices.gpus}{"\n"}hostDevices={.spec.template.spec.domain.devices.hostDevices}{"\n"}'
 ----
-
-TIP: Both fields empty is the expected lab baseline. Do not add devices to this VM.
 ====
 
-.Remediation
+.Remove hostDevices index 0, or gpus index 0 at spec.template.spec.domain.devices, from VirtualMachine VM_NAME in NAMESPACE. Leave vm rhel9-vm in rhacs-virt unchanged. Expect that VM to disappear from the jq list
 [%collapsible]
 ====
-Remove host device index 0 from a VM you *intend* to change. Do not run this against `rhel9-vm`.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 # oc patch vm VM_NAME -n NAMESPACE --type='json' -p='[
 #   {"op": "remove", "path": "/spec/template/spec/domain/devices/hostDevices/0"}
 # ]'
 ----
-
-GPUs use `/spec/template/spec/domain/devices/gpus/0`. Stop the VM if the API requires it, patch, then start.
-
-TIP: Re-run the cluster-wide `jq`. That VM should disappear from the list.
 ====
 
 === Control: Disable overcommitting guest memory (Level 1 Control)
@@ -101,7 +91,7 @@ TIP: Re-run the cluster-wide `jq`. That VM should disappear from the list.
 
 *Default:* The flag is unset/false. The audit list should be empty.
 
-.Audit overcommitGuestOverhead
+.List VirtualMachines with spec.template.spec.domain.resources.overcommitGuestOverhead true, then print that field on vm rhel9-vm in rhacs-virt. Expect the list empty, and rhel9-vm empty or false
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -117,23 +107,17 @@ oc get vm -A -o json | jq -r '
 ----
 oc get vm rhel9-vm -n rhacs-virt -o jsonpath='{.spec.template.spec.domain.resources.overcommitGuestOverhead}{"\n"}'
 ----
-
-TIP: First command empty, second command empty or `false`.
 ====
 
-.Remediation
+.Remove spec.template.spec.domain.resources.overcommitGuestOverhead from VirtualMachine VM_NAME in NAMESPACE. Leave vm rhel9-vm in rhacs-virt unchanged. Expect that VM to leave the jq list
 [%collapsible]
 ====
-Stop the guest, remove the flag, start it. Example for a non-lab VM:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 # oc patch vm VM_NAME -n NAMESPACE --type='json' -p='[
 #   {"op": "remove", "path": "/spec/template/spec/domain/resources/overcommitGuestOverhead"}
 # ]'
 ----
-
-TIP: The VM should no longer appear in the `jq` select. Do not patch `rhel9-vm` unless you set this flag yourself (you should not have).
 ====
 
 == Debrief

@@ -230,17 +230,18 @@ If we restart that pod, the attacker's toolkit is gone forever. I need a CRIU ch
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Switch to your payment gateway namespace
+.Switch to project payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
-include::partial$payment-gateway-namespace.adoc[]
+[source,sh,subs="attributes",role=execute]
+----
+oc project payment-gateway-{workshop_user_suffix}
+----
 ====
 
-.Step 2 — Trigger a CRIU checkpoint
+.Checkpoint container httpd in pod payment-gateway on the node from label app=payment-gateway, POST the kubelet proxy checkpoint API with the oc whoami token, save the tarball under /tmp, and list it
 [%collapsible]
 ====
-Trigger a container checkpoint via the kubelet API:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 NODE_NAME=$(oc get pods -l app=payment-gateway -o jsonpath='{.items[0].spec.nodeName}')
@@ -274,11 +275,9 @@ ls -lah "/tmp/$CHECKPOINT_FILE"
 image::fsi-security/criu-checkpoint.png[CRIU checkpoint archive,link=self, window=blank, width=100%]
 ====
 
-.Step 3 — Inspect the checkpoint with checkpointctl
+.Install checkpointctl from https://raw.githubusercontent.com/jmhbnz/checkpointctl/main/bin/checkpointctl to /tmp/checkpointctl, then run checkpointctl inspect --ps-tree-env on `/tmp/checkpoint-payment-gateway_payment-gateway*`. Expect exfil.sh
 [%collapsible]
 ====
-Install and run `checkpointctl` to inspect the process tree:
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 curl --silent --fail --location \
@@ -290,8 +289,6 @@ export PATH=/tmp:$PATH
 
 checkpointctl inspect --ps-tree-env /tmp/checkpoint-payment-gateway_payment-gateway*
 ----
-
-TIP: Look for `exfil.sh` in the process tree—the smoking gun from the simulated intrusion.
 ====
 
 === What you learned

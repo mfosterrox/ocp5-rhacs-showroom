@@ -36,7 +36,7 @@ Click each step for the full solution.
 
 === Part A: SIEM still there?
 
-.Splunk route and password
+.Print route splunk-web in namespace splunk, or if it is missing run ~/ocp5-rhacs-showroom/setup/splunk-lab/install.sh with SPLUNK_RUN_CLEAN_FIRST=false, then print the route and decode secret splunk-auth key password. Sign in as admin
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -44,15 +44,11 @@ Click each step for the full solution.
 oc get route splunk-web -n splunk -o jsonpath='https://{.spec.host}{"\n"}' 2>/dev/null || echo "Splunk missing — reinstall"
 ----
 
-If the route is missing (typical after xref:201-07-compliance-tailoring.adoc[201-07] cleanup):
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 cd ~/ocp5-rhacs-showroom/setup/splunk-lab
 SPLUNK_RUN_CLEAN_FIRST=false ./install.sh
 ----
-
-Then:
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
@@ -60,17 +56,13 @@ oc get route splunk-web -n splunk -o jsonpath='https://{.spec.host}{"\n"}'
 echo "admin password:"
 oc -n splunk get secret splunk-auth -o jsonpath='{.data.password}' | base64 -d; echo
 ----
-
-TIP: Sign in as `admin`. Hunt in **Search & Reporting**. First boot can take 10–25 minutes if you reinstall.
 ====
 
 === Part B: Generate the bad action
 
-.Exec into the 301-04 probe (or a sleeper)
+.If deploy pkgmgr-probe exists in namespace 301-04-runtime, exec dnf --version and echo IR-LAB-EXEC on the pod labeled app=pkgmgr-probe. Otherwise create project 301-05-ir, run pod sleeper with image registry.access.redhat.com/ubi9/ubi and command sleep infinity, wait for Ready with timeout 90s, and echo IR-LAB-EXEC. Then print UTC time with date -u +%Y-%m-%dT%H:%M:%SZ
 [%collapsible]
 ====
-Prefer the probe if 301-04 is still deployed—then ACS and audit line up on the same pod.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 if oc get deploy pkgmgr-probe -n 301-04-runtime >/dev/null 2>&1; then
@@ -85,11 +77,9 @@ else
 fi
 date -u +%Y-%m-%dT%H:%M:%SZ
 ----
-
-TIP: Note the UTC timestamp. If ACS runtime enforce is still on, the probe pod may be killed (that is evidence, not failure).
 ====
 
-.Seed Splunk if the forwarder is slow
+.Run ~/ocp5-rhacs-showroom/setup/splunk-lab/push-recent-audit.sh
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -98,35 +88,27 @@ cd ~/ocp5-rhacs-showroom/setup/splunk-lab
 chmod +x push-recent-audit.sh
 ./push-recent-audit.sh
 ----
-
-TIP: Same helper as 201-06. Gives you kube-apiserver lines without waiting on the collector.
 ====
 
 === Part C: Hunt and join
 
-.API audit in Splunk
+.In Splunk Search and Reporting, query index=main sourcetype="kube:apiserver:audit" for pkgmgr-probe or sleeper or 301-04-runtime or 301-05-ir and exec. Expect user.username, objectRef.namespace, objectRef.name, objectRef.subresource exec, verb create or connect, and sourceIPs
 [%collapsible]
 ====
-Search:
-
 ----
 index=main sourcetype="kube:apiserver:audit" (pkgmgr-probe OR sleeper OR 301-04-runtime OR 301-05-ir) exec
 ----
-
-TIP: Expand an event: `user.username`, `objectRef.namespace`, `objectRef.name`, `objectRef.subresource` (`exec`), `verb` (`create` / `connect`), `sourceIPs`. That is **who** called the API.
 ====
 
-.RHACS in Splunk (if the notifier is installed)
+.In Splunk, query `index=* sourcetype="stackrox-*"` for pkgmgr-probe or 301-04-runtime or "Package Manager". If that search is empty, open Violations in Central
 [%collapsible]
 ====
 ----
 index=* sourcetype="stackrox-*" (pkgmgr-probe OR 301-04-runtime OR "Package Manager")
 ----
-
-TIP: Empty `stackrox-*` means the notifier was not configured—open **Violations** in Central for the same window. You still have the audit half.
 ====
 
-.ACS console + pod logs
+.Print route central in namespace stackrox, then show the last 20 events in namespaces 301-04-runtime and 301-05-ir. Expect Killing or Started
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -135,8 +117,6 @@ oc get route central -n stackrox -o jsonpath='https://{.spec.host}{"\n"}'
 oc get events -n 301-04-runtime --sort-by='.lastTimestamp' 2>/dev/null | tail -20
 oc get events -n 301-05-ir --sort-by='.lastTimestamp' 2>/dev/null | tail -20
 ----
-
-TIP: Central **Violations**: policy, deployment, process, enforcement. Events: `Killing` / `Started`. Together with Splunk you can fill the table below.
 ====
 
 === Part D: Five-line timeline
@@ -168,10 +148,10 @@ Fill this in from the hunts (example answers in the hint).
 |ACS enforcement + OpenShift `Killing` event
 |===
 
-.Example filled row (collapsible)
+.Example timeline at 14:02:11Z for user lab-user, namespace 301-04-runtime, pod pkgmgr-probe, process dnf --version: runtime enforce killed the pod and the Deployment recreated a replica
 [%collapsible]
 ====
-`14:02:11Z` — `lab-user` — `301-04-runtime` / `pkgmgr-probe-…` — `dnf --version` — yes, ACS runtime enforce killed the pod; Deployment recreated a replica.
+14:02:11Z, user lab-user, namespace 301-04-runtime, pod pkgmgr-probe, process dnf --version. ACS runtime enforce killed the pod and the Deployment recreated a replica.
 
 Detection rule worth keeping: IF (`exec` in a prod-like namespace) AND (ACS package-manager violation within 60s) THEN page the on-call.
 ====

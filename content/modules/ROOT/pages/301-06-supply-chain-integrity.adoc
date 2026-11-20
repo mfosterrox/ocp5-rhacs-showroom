@@ -36,54 +36,44 @@ Click each step for the full solution.
 
 === Part A: Provenance of the catalog image
 
-.Inspect UBI Python (digest + config)
+.Show image info for registry.access.redhat.com/ubi9/python-311:latest filtered to linux/amd64. Expect a Digest sha256 line
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc image info registry.access.redhat.com/ubi9/python-311:latest --filter-by-os=linux/amd64
 ----
-
-TIP: Record `Digest: sha256:…`. Catalog page: https://images.redhat.com/[images.redhat.com] → Python / ubi9. That digest is what 301-02 pinned.
 ====
 
-.Optional: ACS image scan as the SBOM stand-in
+.In Central Vulnerability Management, open Images or Workload CVEs and filter python-311 or 301-02-python
 [%collapsible]
 ====
 In Central: **Vulnerability Management → Images** (or **Workload CVEs**). Filter `python-311` or `301-02-python`.
-
-TIP: ACS lists components and CVEs. That is the bill of materials evidence this lab needs. Generating SPDX with Syft is optional and not required if the binary is not on the bastion.
 ====
 
-.Optional: cosign/TAS if already installed
+.Run cosign version, or expect "cosign not on PATH"
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 command -v cosign && cosign version || echo "cosign not on PATH — use TSSC-00 for signing your own images; Red Hat catalog signatures are registry/RPM metadata, not a cosign key you hold"
 ----
-
-TIP: Do not expect `cosign verify` of `ubi9/python-311` with a workshop Rekor key. Your *application* images get TAS in TSSC-00.
 ====
 
 === Part B: Admit only digest-pinned Deployments
 
-.Label a namespace and apply the VAP
+.Create or switch to project 301-06-supply, label the namespace digest-pin-enforce=true, then apply ~/ocp5-rhacs-showroom/setup/supply-chain-lab/require-digest-vap.yaml. Expect ValidatingAdmissionPolicy require-digest-deployments
 [%collapsible]
 ====
-Bindings match `digest-pin-enforce=true` only—not cluster-wide.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc new-project 301-06-supply || oc project 301-06-supply
 oc label ns 301-06-supply digest-pin-enforce=true --overwrite
 oc apply -f ~/ocp5-rhacs-showroom/setup/supply-chain-lab/require-digest-vap.yaml
 ----
-
-TIP: `validatingadmissionpolicy.admissionregistration.k8s.io/require-digest-deployments` created.
 ====
 
-.Tag-only Deployment (expect deny)
+.Apply Deployment tag-only in namespace 301-06-supply, replicas 1, label app=tag-only, container app, image registry.access.redhat.com/ubi9/python-311:latest, command sleep infinity. Expect deny "pin every container image to a digest"
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -109,11 +99,9 @@ spec:
         command: ["sleep", "infinity"]
 EOF
 ----
-
-TIP: Admission denies (`pin every container image to a digest`). Tampering control at the API.
 ====
 
-.Digest-pinned Deployment (expect allow)
+.Resolve the digest of registry.access.redhat.com/ubi9/python-311:latest for linux/amd64, then apply Deployment pinned in namespace 301-06-supply, replicas 1, label app=pinned, container app, image registry.access.redhat.com/ubi9/python-311@${DIGEST}, command sleep infinity, allowPrivilegeEscalation false, drop ALL, runAsNonRoot true. Expect the Deployment to be created
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -146,8 +134,6 @@ spec:
           runAsNonRoot: true
 EOF
 ----
-
-TIP: Deployment created. Same rule 301-02 followed in GitOps.
 ====
 
 == Debrief

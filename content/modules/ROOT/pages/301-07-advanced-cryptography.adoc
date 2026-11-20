@@ -27,18 +27,16 @@ Read APIServer encryption, confirm the Python app has no Secret env, and check d
 
 Click each step for the full solution.
 
-.etcd encryption type
+.Print apiserver cluster spec.encryption.type. Expect aesgcm or aescbc. Empty or identity means encryption at rest is off
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get apiserver cluster -o jsonpath='{.spec.encryption.type}{"\n"}'
 ----
-
-TIP: `aesgcm` or `aescbc` means encryption at rest is on. Empty or `identity` means xref:101-08-etcd-encryption-control-plane.adoc[101-08] still applies—do not skip it on a real cluster.
 ====
 
-.No secret-as-env on the catalog Python app
+.Print env and envFrom for container 0 of deploy/python-app in namespace 301-02-python. Expect empty, or "301-02-python not deployed"
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -46,11 +44,9 @@ TIP: `aesgcm` or `aescbc` means encryption at rest is on. Empty or `identity` me
 oc get deploy python-app -n 301-02-python -o jsonpath='{.spec.template.spec.containers[0].env}{"\n"}' 2>/dev/null || echo "301-02-python not deployed — skip or re-run 301-02"
 oc get deploy python-app -n 301-02-python -o json | jq -r '.spec.template.spec.containers[0].envFrom // empty'
 ----
-
-TIP: Empty env / envFrom. Credentials belong in Vault/ESO (201-05) or SPIFFE (301-08), not `valueFrom.secretKeyRef` on this app.
 ====
 
-.Ingress HTTPS redirect
+.Print spec.defaultCertificate and redirect lines for ingresscontroller default in namespace openshift-ingress-operator, then list routes. Expect redirect
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -59,19 +55,15 @@ oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.sp
 oc get ingresscontroller default -n openshift-ingress-operator -o yaml | grep -A2 -i redirect || true
 oc get route -A | head
 ----
-
-TIP: Edge Routes should be TLS (101-12). cert-manager (201-08) is how you get a globally trusted cert. `.svc.cluster.local` stays internal.
 ====
 
-.Vault still the KMS-adjacent pattern
+.List pods in namespace vault, or expect "Vault not running"
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get pods -n vault 2>/dev/null || echo "Vault not running — 201-05 is the install path if you need CSI secrets"
 ----
-
-TIP: External keys and rotation live there; this lab does not reinstall Vault.
 ====
 
 == Debrief

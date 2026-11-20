@@ -89,18 +89,14 @@ This table is the 201 capstone. **301** is how you apply the same row when one w
 
 **Lateral movement** sits on Tampering + Information disclosure for east-west traffic. Tenant NetworkPolicy is xref:101-05-network-policy-basics.adoc[101-05]. Platform-owned **AdminNetworkPolicy** is xref:301-03-multi-tenant-zero-trust-network.adoc[301-03] so a project admin cannot leave the front door open.
 
-.Confirm you are still on the same cluster
+.Run oc whoami and oc project. Expect user lab-user
 [%collapsible]
 ====
-No new projects. This is a sanity check before you treat the table as “done.”
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc whoami
 oc project
 ----
-
-TIP: You should still be `lab-user` (or cluster-admin) on the roadshow cluster. If this fails, fix login before 301.
 ====
 
 === How an enterprise applies the map
@@ -132,11 +128,9 @@ One threat → one *control* → one *delivery mechanism*. Wikis do not scale; t
 |xref:201-06-audit-monitoring-correlation.adoc[201-06], xref:301-05-incident-response-forensics.adoc[301-05]
 |===
 
-.Optional backlog (discussion — do not oc apply)
+.Optional backlog discussion, do not oc apply: automountServiceAccountToken false, SPIFFE, tag `:latest`, digest pin, AdminNetworkPolicy, ACS enforce on dnf, Splunk plus ACS, PSA restricted, and musthave ResourceQuota
 [%collapsible]
 ====
-Five to seven tickets is a working backlog. Each ticket is one sentence of threat plus one acceptance criterion that names the control.
-
 * Stolen SA token → no automount on app SAs; SPIFFE for the database (301-08)
 * Mutable `:latest` → GitOps deploy of UBI Python by digest (301-02)
 * Tenant can delete NetworkPolicy → AdminNetworkPolicy deny cross-tenant (301-03)
@@ -144,8 +138,6 @@ Five to seven tickets is a working backlog. Each ticket is one sentence of threa
 * Exec with no SIEM hit → Splunk audit + ACS violation timeline (301-05)
 * Privileged pod in a “restricted” namespace → RHACM PSA labels + admission deny (301-01 / 201-10)
 * Unbounded noisy neighbor → musthave ResourceQuota (301-01)
-
-TIP: Commit `threat-model-app.md` in Git and put a quarterly review on the calendar. A model that is not in Git will not survive the next architecture change.
 ====
 
 == Debrief

@@ -9,11 +9,13 @@ baselining
 bootc
 Buildah
 checkpointctl
+checkpointing
 clusterrole
 CMDB
 cmdline
 configmap
 Conforma
+Containerfiles
 creds
 CRIU
 CSAF
@@ -97,6 +99,7 @@ tlog
 TSSC
 ungated
 undeployed
+unpickles
 unreviewable
 unscanned
 urlopen
@@ -107,7 +110,9 @@ Venafi
 vfio
 virtio
 virtiofs
+virtualenv
 VMIM
 vulns
+Woodstox
 YAMLS
 ZTWIM

@@ -57,11 +57,9 @@ Click each step for the full solution.
 
 === Part A: Hub inventory and placement
 
-.Confirm RHACM Policy CRDs and local-cluster
+.Get CRD policies.policy.open-cluster-management.io, ManagedClusters, labels for ManagedCluster local-cluster, and ManagedClusterSets. Expect the CRD, local-cluster=true, and a ManagedClusterSet
 [%collapsible]
 ====
-If this fails, install **Advanced Cluster Management for Kubernetes** from OperatorHub (or ask the platform owner). Do not paste Gatekeeper ConstraintTemplates in this lab.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc get crd policies.policy.open-cluster-management.io
@@ -69,43 +67,31 @@ oc get managedcluster
 oc get managedcluster local-cluster --show-labels 2>/dev/null || oc get managedcluster --show-labels
 oc get managedclusterset
 ----
-
-TIP: CRD exists. At least one ManagedCluster. `local-cluster=true` is the usual hub label. A ManagedClusterSet (often `default`) is required so Placement can select clusters.
 ====
 
-.Bind a ClusterSet into namespace policies
+.Make ~/ocp5-rhacs-showroom/setup/acm-lab/bind-clusterset.sh executable, then run it. Expect a ManagedClusterSetBinding in namespace policies
 [%collapsible]
 ====
-Placement in a custom namespace selects **zero** clusters until a `ManagedClusterSetBinding` exists. The helper uses the first ClusterSet on the hub.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 cd ~/ocp5-rhacs-showroom/setup/acm-lab
 chmod +x bind-clusterset.sh
 ./bind-clusterset.sh
 ----
-
-TIP: `managedclustersetbinding.cluster.open-cluster-management.io` created (or configured) in `policies`. Override the set with `MANAGED_CLUSTER_SET=default ./bind-clusterset.sh` if needed.
 ====
 
 === Part B: Inform (report drift, do not change the cluster yet)
 
-.Apply the DoD baseline Policy (inform)
+.Apply ~/ocp5-rhacs-showroom/setup/acm-lab/policy-dod-ocp-baseline.yaml. Expect Policy policy-dod-ocp-baseline, a Placement, and a PlacementBinding
 [%collapsible]
 ====
-Same shape as the sovereign-cloud GDPR example: `Policy` + `Placement` + `PlacementBinding`. Remediation starts as **inform**—RHACM reports NonCompliant until the namespace, NetworkPolicy, and LimitRange exist. It does not create them yet.
-
-YAML lives in this roadshow repo (`setup/acm-lab/policy-dod-ocp-baseline.yaml`). You can also paste it under **Governance → Create policy** / Import YAML.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f ~/ocp5-rhacs-showroom/setup/acm-lab/policy-dod-ocp-baseline.yaml
 ----
-
-TIP: `policy.policy.open-cluster-management.io/policy-dod-ocp-baseline created` (and Placement / PlacementBinding).
 ====
 
-.Read Policy status (expect NonCompliant)
+.Get Policies, Placements, and PlacementBindings in namespace policies, status.compliant for Policy policy-dod-ocp-baseline, and namespace dod-workloads. Expect NonCompliant and dod-workloads not created yet
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -114,27 +100,21 @@ oc get policy,placement,placementbinding -n policies
 oc get policy policy-dod-ocp-baseline -n policies -o jsonpath='{.status.compliant}{"\n"}' ; echo
 oc get ns dod-workloads 2>/dev/null || echo "dod-workloads not created yet (inform does not remediate)"
 ----
-
-TIP: `COMPLIANT` is `NonCompliant` (or empty for a few seconds). Namespace `dod-workloads` should **not** exist yet. Console: **Fleet Management → Governance → Policies**, filter namespace `policies`. Annotations show NIST / DISA / DoD CC SRG.
 ====
 
 === Part C: Enforce (configure the cluster from policy)
 
-.Switch the Policy to enforce
+.Patch Policy policy-dod-ocp-baseline in namespace policies, merging spec.remediationAction=enforce
 [%collapsible]
 ====
-Same action as the sovereign-cloud lab’s **Actions → Remediation → Enforce**. The hub tells the config-policy-controller to create missing objects.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc patch policy policy-dod-ocp-baseline -n policies --type merge \
   -p '{"spec":{"remediationAction":"enforce"}}'
 ----
-
-TIP: `policy.policy.open-cluster-management.io/policy-dod-ocp-baseline patched`. Wait 15–30 seconds.
 ====
 
-.Confirm the cluster now has the baseline objects
+.Get Policy policy-dod-ocp-baseline in namespace policies, labels on namespace dod-workloads, and NetworkPolicies and LimitRanges in dod-workloads. Expect Compliant, pod-security.kubernetes.io/enforce=restricted, dod.cc-srg/impact-level=il2, default-deny-ingress, and bounded-defaults
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -143,19 +123,15 @@ oc get policy policy-dod-ocp-baseline -n policies
 oc get ns dod-workloads --show-labels
 oc get networkpolicy,limitrange -n dod-workloads
 ----
-
-TIP: Policy `Compliant`. Namespace labels include `pod-security.kubernetes.io/enforce=restricted` and `dod.cc-srg/impact-level=il2`. `default-deny-ingress` and `bounded-defaults` exist. New clusters in the same Placement would get the same three objects without a human applying them.
 ====
 
 === Part D: Admission still matches the baseline
 
 RHACM configured the namespace. OpenShift admission (PSA + SCC) is what denies the bad pod. You did not write Gatekeeper Rego.
 
-.Apply a privileged pod in dod-workloads (expect deny)
+.Apply Pod privileged-denied in namespace dod-workloads with image registry.access.redhat.com/ubi9/ubi, privileged true, and command sleep 5. Expect Forbidden and violates PodSecurity restricted:privileged
 [%collapsible]
 ====
-`privileged: true` violates restricted PSA (AC-6). This is the “front door” check.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n dod-workloads -f - <<'EOF'
@@ -172,15 +148,11 @@ spec:
     command: ["sleep","5"]
 EOF
 ----
-
-TIP: Admission rejects the pod (`Forbidden` / `violates PodSecurity` / `restricted:privileged`). The Policy stayed Compliant—the deny is the baseline working, not a failed enforce.
 ====
 
-.Apply a root sleep pod (expect deny)
+.Apply Pod root-denied in namespace dod-workloads with image registry.access.redhat.com/ubi9/ubi and command sleep 5. Expect deny for runAsNonRoot or allowPrivilegeEscalation
 [%collapsible]
 ====
-UBI9 as root also fails restricted PSA (`runAsNonRoot`). Same control family as the old Gatekeeper `runAsNonRoot` constraint, now coming from the namespace the Policy created.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -n dod-workloads -f - <<'EOF'
@@ -195,8 +167,6 @@ spec:
     command: ["sleep","5"]
 EOF
 ----
-
-TIP: Denied (`must set runAsNonRoot` / `restricted:allowPrivilegeEscalation != false`, depending on version). NetworkPolicy default-deny is already in the namespace (SC-7); tighten allows using xref:101-05-network-policy-basics.adoc[101-05].
 ====
 
 == Debrief

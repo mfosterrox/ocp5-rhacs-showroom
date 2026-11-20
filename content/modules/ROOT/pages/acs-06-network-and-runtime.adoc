@@ -378,13 +378,16 @@ Cut the egress now—but don't restart the pod. We still need the in-memory evid
 
 include::partial$security-exercise-task-intro.adoc[]
 
-.Step 1 — Switch to your payment gateway namespace
+.Switch to project payment-gateway-{workshop_user_suffix}
 [%collapsible]
 ====
-include::partial$payment-gateway-namespace.adoc[]
+[source,sh,subs="attributes",role=execute]
+----
+oc project payment-gateway-{workshop_user_suffix}
+----
 ====
 
-.Step 2 — Review external connections in Network Graph
+.In Network Graph, filter namespace payment-gateway-{workshop_user_suffix} and deployment payment-gateway, then open External Entities and confirm the C2 IP
 [%collapsible]
 ====
 . In RHACS, open *Network Graph*.
@@ -394,11 +397,9 @@ include::partial$payment-gateway-namespace.adoc[]
 image::fsi-security/rhacs-externalip.png[External connections in RHACS,link=self, window=blank, width=100%]
 ====
 
-.Step 3 — Apply deny-all egress NetworkPolicy
+.Apply NetworkPolicy payment-gateway-deny-egress in namespace payment-gateway-{workshop_user_suffix}, podSelector app=payment-gateway, policyTypes Egress, and an empty egress list
 [%collapsible]
 ====
-Apply a deny-all egress NetworkPolicy (break-glass during active incident):
-
 [source,yaml]
 ----
 apiVersion: networking.k8s.io/v1
@@ -414,8 +415,6 @@ spec:
     - Egress
   egress: []
 ----
-
-Apply via the OpenShift console *Import YAML* or:
 
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
@@ -436,7 +435,7 @@ EOF
 ----
 ====
 
-.Step 4 — Confirm egress is blocked
+.In Network Graph, confirm egress from deployment payment-gateway is blocked and the pod keeps running
 [%collapsible]
 ====
 image::fsi-security/apply-networkpolicy.png[Apply network policy,link=self, window=blank, width=100%]

@@ -17,7 +17,7 @@ Find the exec in the API audit log, confirm the external connection in RHACS, ap
 
 Use the *Terminal* tab for the commands below.
 
-.Search control-plane audit logs for the exec
+.On each master node, search kube-apiserver/audit.log for namespace payment-gateway-{workshop_user_suffix}, objectRef.name payment-gateway, verb create, and subresource exec. Expect user.username system:serviceaccount:payment-gateway-{workshop_user_suffix}:cicd-pipeline-runner-sa, responseStatus.code 101, an exec into container httpd, and annotations naming the RoleBinding
 [%collapsible]
 ====
 [source,bash,subs="+macros,+attributes",role=execute]
@@ -33,18 +33,9 @@ for master in $(oc get nodes --selector node-role.kubernetes.io/master --output 
           and .objectRef.subresource == "exec"))'
 done
 ----
-
-Read the event you get back:
-
-* `user.username` is `system:serviceaccount:payment-gateway-{workshop_user_suffix}:cicd-pipeline-runner-sa`
-* `responseStatus.code` is `101` (the API server upgraded the connection; the exec succeeded)
-* `requestURI` shows an exec into the `httpd` container
-* `annotations` name the RoleBinding that allowed that service account to exec
-
-The pipeline account is only supposed to push manifests. It had permission to exec into a live pod.
 ====
 
-.Confirm the external connection in RHACS
+.In RHACS Network Graph, filter namespace payment-gateway-{workshop_user_suffix} and deployment payment-gateway, then open External Entities and find 185.199.108.153. Sign in with the RHACS username and password on the home page
 [%collapsible]
 ====
 . In RHACS, open *Network Graph*.
@@ -58,11 +49,9 @@ image::fsi-security/rhacs-externalip.png[External connections in RHACS,link=self
 Sign in with the RHACS username and password on the xref:ROOT:index.adoc[home page].
 ====
 
-.Deny egress from the payment gateway
+.Apply NetworkPolicy payment-gateway-deny-egress in payment-gateway-{workshop_user_suffix} selecting app=payment-gateway, policyTypes Egress, and an empty egress list. Expect the external connection to drop while the pod stays up
 [%collapsible]
 ====
-This is a break-glass change during an active incident. Leave the pod running.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc apply -f - <<EOF
@@ -82,17 +71,11 @@ EOF
 ----
 
 image::fsi-security/apply-networkpolicy.png[Deny egress NetworkPolicy,link=self, window=blank, width=100%]
-
-An empty `egress` list denies all egress from pods labeled `app=payment-gateway`. Return to the Network Graph and confirm the external connection drops while the pod stays up.
-
-NetworkPolicy reference: {docs-networkpolicy-url}[{docs-networkpolicy-url}^].
 ====
 
-.Collect audit logs for the support case
+.Collect audit logs with oc adm must-gather in namespace payment-gateway-{workshop_user_suffix} into /tmp/incident-artifacts using /usr/bin/gather_audit_logs, then find directories named audit_logs
 [%collapsible]
 ====
-In a real incident you would attach this bundle to a support case. Here, practice the collection and leave the case unopened.
-
 [source,bash,subs="+macros,+attributes",role=execute]
 ----
 oc adm must-gather \
